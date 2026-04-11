@@ -1247,6 +1247,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 
 	// Voice message: transcribe to text first
 	if msg.Audio != nil {
+		// ... 处理语音转文字 ...
 		// If STT is configured, use it for transcription (more accurate)
 		if e.speech.Enabled && e.speech.STT != nil {
 			e.handleVoiceMessage(p, msg)
@@ -1276,6 +1277,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		// Continue processing with the platform-provided text content
 	}
 
+	// 过滤掉纯空格的消息，或者把“助手”这样的别名替换掉。
 	content := strings.TrimSpace(msg.Content)
 	if content == "" && len(msg.Images) == 0 && len(msg.Files) == 0 {
 		return
@@ -1286,6 +1288,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 	msg.Content = content
 
 	// Rate limit check (per-user role-based, then global fallback)
+	// 防止你刷屏，或者拦截敏感词。
 	if !e.checkRateLimit(msg) {
 		slog.Info("message rate limited",
 			"session", msg.SessionKey, "user_id", msg.UserID, "user", msg.UserName)
@@ -1303,6 +1306,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 	}
 
 	// Multi-workspace resolution
+	// 如果你配置了多个工作区，这里会决定把消息路由到哪个工作区的 AI。
 	var wsAgent Agent
 	var wsSessions *SessionManager
 	var resolvedWorkspace string
@@ -1350,6 +1354,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		}
 	}
 
+	// 处理 /help, /new 等命令。
 	if len(msg.Images) == 0 && strings.HasPrefix(content, "/") {
 		if e.handleCommand(p, msg, content) {
 			return
@@ -1374,8 +1379,10 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 
 	session := sessions.GetOrCreateActive(msg.SessionKey)
 	sessions.UpdateUserMeta(msg.SessionKey, msg.UserName, msg.ChatName)
-	if !session.TryLock() {
+	if !session.TryLock() { // TryLock：如果 AI 正在处理上一条消息，这里会锁住会话，防止并发冲突。
 		// Check for /btw — inject into the running session mid-turn
+		// ... 处理 /btw 命令 ...
+		// ... 消息排队 ...
 		trimmed := strings.TrimSpace(content)
 		if isBtwCommand(trimmed) {
 			btw := strings.TrimSpace(trimmed[len(matchBtwPrefix(trimmed)):])
@@ -1420,6 +1427,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		"session", session.ID,
 	)
 
+	// 这是最后一步，启动一个协程，真正去调用 AI 处理消息。
 	go e.processInteractiveMessageWith(p, msg, session, agent, sessions, interactiveKey, resolvedWorkspace, msg.SessionKey)
 }
 
@@ -1785,6 +1793,11 @@ func (e *Engine) processInteractiveMessage(p Platform, msg *Message, session *Se
 // It accepts an explicit agent, interactiveKey (for the interactiveStates map),
 // and workspaceDir so that multi-workspace mode can route to per-workspace agents.
 // ccSessionKey, when non-empty, is used for CC_SESSION_KEY in the agent env; otherwise interactiveKey is used.
+// 1. 获取或创建 AI 会话状态：确保有一个可用的 AI 进程。
+// 2. 准备消息内容：构建发送给 AI 的提示词。
+// 3. 并发发送消息：将用户的消息发送给 AI 进程。
+// 4. 处理 AI 的响应事件：监听并处理 AI 返回的各种事件（如回复、错误等）。
+// 5. 管理会话锁：确保同一时间只有一个消息在处理，避免并发冲突。
 func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session *Session, agent Agent, sessions *SessionManager, interactiveKey string, workspaceDir string, ccSessionKey string) {
 	// session.Unlock() is NOT deferred here — it is called explicitly in
 	// the drain loop below while holding state.mu to close the race window
@@ -1811,6 +1824,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	if agent != e.agent {
 		agentOverride = agent
 	}
+	// 这是整个函数的第一步，也是最关键的一步。它会调用你之前看到的 getOrCreateInteractiveStateWith 函数，确保有一个可用的 AI 会话。
 	state := e.getOrCreateInteractiveStateWith(interactiveKey, p, msg.ReplyCtx, session, sessions, agentOverride, ccSessionKey)
 
 	// Set workspaceDir on the state for idle reaper identification
@@ -1827,7 +1841,8 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	state.mu.Unlock()
 
 	if state.agentSession == nil {
-		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFailedToStartAgentSession))
+		// 如果 getOrCreateInteractiveStateWith 返回的 state 中 agentSession 为 nil，说明 AI 进程启动失败，直接回复用户“启动 AI 会话失败”。
+		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFailedToStartAgentSession)) // 主动发送消息。
 		return
 	}
 
@@ -1867,8 +1882,10 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	// Drain any stale events left in the channel from a previous turn.
 	// This prevents the next processInteractiveEvents from reading an old
 	// EventResult that was pushed after the previous turn already returned.
+	// 在发送新消息之前，先清理掉 AI 事件通道中可能残留的旧事件。这可以防止处理到过时的响应。
 	drainEvents(state.agentSession.Events())
 
+	// 将用户的消息内容、用户ID、平台信息等组合成一个完整的提示词，准备发送给 AI。
 	promptContent := e.buildSenderPrompt(msg.Content, msg.UserID, msg.Platform, msg.SessionKey)
 
 	sendStart := time.Now()
@@ -1880,11 +1897,13 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	// Run Send concurrently with processInteractiveEvents. Some agents block inside
 	// Send until the prompt turn finishes (e.g. ACP session/prompt); they may emit
 	// EventPermissionRequest while blocked — the event loop must run in parallel.
+	// 在一个独立的 Goroutine 中发送消息给 AI 进程。这样做是为了避免阻塞主流程，因为某些 AI 进程可能会在 Send 调用中阻塞。
 	sendDone := make(chan error, 1)
 	go func() {
 		sendDone <- state.agentSession.Send(promptContent, msg.Images, msg.Files)
 	}()
 
+	// 这是整个函数的核心循环。它会监听 AI 进程返回的各种事件（如回复、错误、权限请求等），并根据事件类型进行相应的处理（如回复用户、更新会话状态等）。
 	e.processInteractiveEvents(state, session, sessions, interactiveKey, msg.MessageID, turnStart, stopTyping, sendDone, msg.ReplyCtx)
 	if elapsed := time.Since(sendStart); elapsed >= slowAgentSend {
 		slog.Warn("slow agent send", "elapsed", elapsed, "session", msg.SessionKey, "content_len", len(msg.Content))
@@ -1957,16 +1976,20 @@ func (e *Engine) getOrCreateWorkspaceAgent(workspace string) (Agent, *SessionMan
 // getOrCreateInteractiveStateWith accepts an optional agent override for multi-workspace mode.
 // When agentOverride is non-nil it is used instead of e.agent to start the session.
 // ccSessionKey, when non-empty, is used for CC_SESSION_KEY env injection; otherwise sessionKey is used.
+// 这个函数负责为每个用户会话管理一个 AI 代理进程。它决定是复用现有的 AI 进程，还是清理旧的进程并启动一个新的。
 func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, replyCtx any, session *Session, sessions *SessionManager, agentOverride Agent, ccSessionKey string) *interactiveState {
+	// 因为可能有多个用户同时发消息，为了防止两个消息同时修改同一个会话状态，代码先加了一把锁。
 	e.interactiveMu.Lock()
 	defer e.interactiveMu.Unlock()
 
+	// 它检查 sessionKey（比如你的飞书用户ID）是否已经有一个正在运行的 interactiveState（包含 AI 进程）。
 	state, ok := e.interactiveStates[sessionKey]
 	if ok && state.agentSession != nil && state.agentSession.Alive() {
 		// Verify the running agent session matches the current active session.
 		// After /new or /switch the active session changes, but the old agent
 		// process may still be alive. Reusing it would send messages to the
 		// wrong conversation context.
+		// ... 检查 ID 是否匹配 ...
 		wantID := session.GetAgentSessionID()
 		currentID := state.agentSession.CurrentSessionID()
 		// Reuse only when the live process matches what the Session expects:
@@ -1974,11 +1997,14 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 		// - the process has not reported an ID yet (startup; empty want is OK).
 		// If wantID is empty (/new, cleared session) but the process already has
 		// a concrete ID, reusing would keep --resume context — recycle (#238).
+		// 判断是否需要“回收”（杀掉旧进程）
+		// 如果你开启了新对话（/new），或者之前的进程 ID 和现在对不上，needRecycle 就会变成 true。
 		needRecycle := currentID != "" && (wantID == "" || wantID != currentID)
 		if !needRecycle {
-			return state
+			return state // 进程活着且ID匹配，直接复用，函数结束
 		}
 		// Tear down the stale agent so we start one that matches the Session below.
+		// 如果不匹配，说明是旧进程，必须杀掉
 		slog.Info("interactive session mismatch, recycling",
 			"session_key", sessionKey,
 			"want_agent_session", wantID,
@@ -1987,11 +2013,14 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 		state.markStopped()
 		// Close synchronously to prevent race condition where old agent
 		// continues outputting while new agent starts (issue #327).
+		// 这个关闭过程可能会比较慢，或者如果进程卡死，它会强制关闭。
+		// 在关闭过程中，如果进程还有没处理完的消息，系统就会打印 drained stale events。
 		e.closeAgentSessionWithTimeout(sessionKey, state.agentSession)
 		delete(e.interactiveStates, sessionKey)
 		ok = false // prevent reading stale settings below
 	}
 
+	// 准备环境变量 (PATH, CC_SESSION_KEY 等)
 	// Preserve quiet setting from existing state (e.g. set via /quiet before session started)
 	quietMode := e.defaultQuiet
 	if ok && state != nil {
@@ -2050,8 +2079,9 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 	// Resume only when we have a concrete saved agent session ID. If the session
 	// is unbound, force a fresh start instead of attaching to whichever CLI
 	// conversation happens to be "latest" in this workspace.
+	// 启动会话
 	startSessionID := session.GetAgentSessionID()
-	isResume := startSessionID != ""
+	isResume := startSessionID != "" // 判断是不是恢复旧会话
 	startAt := time.Now()
 	agentSession, err := agent.StartSession(e.ctx, startSessionID)
 	startElapsed := time.Since(startAt)
@@ -2094,6 +2124,7 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 	}
 	e.interactiveStates[sessionKey] = state
 
+	// 启动新代理成功
 	slog.Info("session spawned", "session_key", sessionKey, "agent_session", session.GetAgentSessionID(), "is_resume", isResume, "elapsed", startElapsed)
 	return state
 }
@@ -2192,6 +2223,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 
 	events := state.agentSession.Events()
 	stopCh := state.stopSignal()
+	// 在一个循环中监听 AI 进程发出来的各种“事件”（比如“我在思考”、“我要运行代码”、“这是结果”），并把这些事件实时地转换成飞书的消息发回去。
 	for {
 		var event Event
 		var ok bool
@@ -2200,11 +2232,11 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 		case <-stopCh:
 			sp.discard()
 			return
-		case event, ok = <-events:
+		case event, ok = <-events: // AI 进程发来的事件（这是主菜）。
 			if !ok {
 				goto channelClosed
 			}
-		case err := <-pendingSend:
+		case err := <-pendingSend: // 之前发送消息给 AI 的动作是否出错（比如 AI 崩了）。简单说：是否发成功了，发送动作的反馈
 			pendingSend = nil
 			if err != nil {
 				slog.Error("failed to send prompt", "error", err, "session_key", sessionKey)
@@ -2224,7 +2256,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				return
 			}
 			continue
-		case <-idleCh:
+		case <-idleCh: // 超时机制，如果 AI 哪怕一秒钟都不发消息，超过一定时间就强制杀掉它。
 			slog.Error("agent session idle timeout: no events for too long, killing session",
 				"session_key", sessionKey, "timeout", e.eventIdleTimeout, "elapsed", time.Since(turnStart))
 			cp.Finalize(ProgressCardStateFailed)
@@ -2274,7 +2306,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 		quiet := globalQuiet || sessionQuiet
 
 		switch event.Type {
-		case EventThinking:
+		case EventThinking: // 处理“思考中” (Thinking)
 			if !quiet && event.Content != "" {
 				// Flush accumulated text segment before thinking display
 				previewActive := sp.canPreview()
@@ -2296,11 +2328,11 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				preview := truncateIf(event.Content, e.display.ThinkingMaxLen)
 				thinkingMsg := fmt.Sprintf(e.i18n.T(MsgThinking), preview)
 				if !cp.AppendEvent(ProgressEntryThinking, preview, "", thinkingMsg) {
-					e.send(p, replyCtx, thinkingMsg)
+					e.send(p, replyCtx, thinkingMsg) // 当 AI 发送 EventThinking 时，这里会回复用户“嗯...让我想想”或者显示具体的思考内容。
 				}
 			}
 
-		case EventToolUse:
+		case EventToolUse: // 显示 AI 调用的工具名称和参数
 			toolCount++
 			if !quiet && e.display.ToolMessages {
 				// Flush accumulated text segment before tool display
@@ -2346,7 +2378,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				}
 			}
 
-		case EventToolResult:
+		case EventToolResult: // 显示工具运行后的结果
 			if !quiet && e.display.ToolMessages {
 				result := strings.TrimSpace(event.ToolResult)
 				if result == "" {
@@ -2391,6 +2423,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			}
 
 		case EventPermissionRequest:
+			// 当 AI 决定运行代码（shell）或搜索时，这里会拦截这些动作。如果配置了需要审批，它会在这里停下来等你点击“同意”；否则就直接显示代码块和结果。
 			isAskQuestion := event.ToolName == "AskUserQuestion" && len(event.Questions) > 0
 
 			state.mu.Lock()
@@ -2468,7 +2501,8 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				idleTimer.Reset(e.eventIdleTimeout)
 			}
 
-		case EventResult:
+		case EventResult: // 处理“最终结果” (EventResult)
+			// 这是 AI 说完最后一句话的时候。它会把之前所有零散的 EventText 拼起来，存入历史记录，并一次性发给用户。
 			cp.Finalize(ProgressCardStateCompleted)
 			if event.SessionID != "" {
 				session.SetAgentSessionID(event.SessionID, e.agent.Name())
@@ -2682,6 +2716,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			return
 
 		case EventError:
+			// 如果 AI 进程内部报错（比如 Python 代码语法错误），AI 会发一个 EventError，这里负责把这个错误展示给用户。
 			cp.Finalize(ProgressCardStateFailed)
 			sp.discard()
 			if event.Error != nil {
@@ -2700,6 +2735,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 
 channelClosed:
 	// Channel closed - process exited unexpectedly
+	// agent退出
 	slog.Warn("agent process exited", "session_key", sessionKey)
 	e.notifyDroppedQueuedMessages(state, fmt.Errorf("agent process exited"))
 	e.cleanupInteractiveState(sessionKey, state)
@@ -6090,7 +6126,7 @@ func drainEvents(ch <-chan Event) {
 			}
 			drained++
 		default:
-			if drained > 0 {
+			if drained > 0 { // 上次 agent 一次退出，存在没有回复的消息，在这次启动新 agent 之前丢弃旧消息。
 				slog.Warn("drained stale events from previous turn", "count", drained)
 			}
 			return

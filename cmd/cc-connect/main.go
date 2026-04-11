@@ -30,7 +30,7 @@ var (
 )
 
 func main() {
-	checkUpdateAsync()
+	//checkUpdateAsync()
 
 	// Handle subcommands before flag parsing
 	if len(os.Args) > 1 {

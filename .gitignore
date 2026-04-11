@@ -126,3 +126,7 @@ Desktop.ini
 *.pfx
 secrets/
 credentials/
+
+web/dist/assets/
+web/dist/favicon.svg
+web/dist/index.html
