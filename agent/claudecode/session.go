@@ -143,7 +143,8 @@ func (cs *claudeSession) readLoop(stdout io.ReadCloser, stderrBuf *bytes.Buffer)
 		if err := cs.cmd.Wait(); err != nil {
 			stderrMsg := strings.TrimSpace(stderrBuf.String())
 			if stderrMsg != "" {
-				slog.Error("claudeSession: process failed", "error", err, "stderr", stderrMsg)
+				// claude 错误信息：time=2026-04-11T02:29:37.568Z level=ERROR msg="claudeSession: process failed" error="exit status 1" stderr="No conversation found with session ID: 2c50be90-4541-4ce0-bb60-8327692c085f"
+				slog.Error("zztest claudeSession: process failed", "error", err, "stderr", stderrMsg)
 				evt := core.Event{Type: core.EventError, Error: fmt.Errorf("%s", stderrMsg)}
 				select {
 				case cs.events <- evt:
@@ -589,4 +590,3 @@ func filterEnv(env []string, key string) []string {
 	}
 	return out
 }
-

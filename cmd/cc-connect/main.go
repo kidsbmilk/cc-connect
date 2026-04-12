@@ -91,7 +91,8 @@ func main() {
 		}
 		logWriter = w
 		logCloser = w
-		slog.SetDefault(slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelInfo})))
+		//slog.SetDefault(slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelInfo})))
+		slog.SetDefault(slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	}
 
 	configFlag := flag.String("config", "", "path to config file (default: ./config.toml or ~/.cc-connect/config.toml)")
@@ -1152,6 +1153,7 @@ func setupLogger(level string, w io.Writer) {
 	if w == nil {
 		w = os.Stdout
 	}
+	logLevel = slog.LevelDebug
 	slog.SetDefault(slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{
 		Level: logLevel,
 	})))

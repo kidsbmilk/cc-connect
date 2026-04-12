@@ -1238,12 +1238,13 @@ func (e *Engine) resolveAlias(content string) string {
 }
 
 func (e *Engine) handleMessage(p Platform, msg *Message) {
-	slog.Info("message received",
+	slog.Info("zztest message received",
 		"platform", msg.Platform, "msg_id", msg.MessageID,
 		"session", msg.SessionKey, "user", msg.UserName,
 		"content_len", len(msg.Content),
 		"has_images", len(msg.Images) > 0, "has_audio", msg.Audio != nil, "has_files", len(msg.Files) > 0,
 	)
+	e.reply(p, msg.ReplyCtx, e.i18n.T("zztest received")) // 主动发送消息。
 
 	// Voice message: transcribe to text first
 	if msg.Audio != nil {
@@ -1421,7 +1422,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		session = rotated
 	}
 
-	slog.Info("processing message",
+	slog.Info("zztest processing message",
 		"platform", msg.Platform,
 		"user", msg.UserName,
 		"session", session.ID,
@@ -1811,10 +1812,12 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	}()
 
 	if e.ctx.Err() != nil {
+		slog.Warn("[CTX] processInteractiveMessageWith aborted: context canceled", "session_key", interactiveKey)
 		return
 	}
 
 	turnStart := time.Now()
+	slog.Debug("[TURN] starting new message turn", "session_key", interactiveKey, "msg_len", len(msg.Content))
 
 	e.i18n.DetectAndSet(msg.Content)
 	session.AddHistory("user", msg.Content)
@@ -1823,15 +1826,21 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	var agentOverride Agent
 	if agent != e.agent {
 		agentOverride = agent
+		slog.Debug("[AGENT] using agent override", "agent", agent.Name())
 	}
 	// 这是整个函数的第一步，也是最关键的一步。它会调用你之前看到的 getOrCreateInteractiveStateWith 函数，确保有一个可用的 AI 会话。
+	slog.Info("zztest before call getOrCreateInteractiveStateWith")
+	slog.Debug("[STATE] fetching or creating interactive state", "session_key", interactiveKey)
 	state := e.getOrCreateInteractiveStateWith(interactiveKey, p, msg.ReplyCtx, session, sessions, agentOverride, ccSessionKey)
+	slog.Info("zztest after call getOrCreateInteractiveStateWith")
+	slog.Debug("[STATE] interactive state acquired", "session_key", interactiveKey, "has_session", state.agentSession != nil)
 
 	// Set workspaceDir on the state for idle reaper identification
 	if workspaceDir != "" {
 		state.mu.Lock()
 		state.workspaceDir = workspaceDir
 		state.mu.Unlock()
+		slog.Debug("[WORKSPACE] set workspace directory", "session_key", interactiveKey, "dir", workspaceDir)
 	}
 
 	// Update reply context for this turn
@@ -1839,8 +1848,10 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	state.platform = p
 	state.replyCtx = msg.ReplyCtx
 	state.mu.Unlock()
+	slog.Debug("[CONTEXT] updated reply context", "session_key", interactiveKey)
 
 	if state.agentSession == nil {
+		slog.Error("[SESSION] agent session is nil, cannot process message", "session_key", interactiveKey)
 		// 如果 getOrCreateInteractiveStateWith 返回的 state 中 agentSession 为 nil，说明 AI 进程启动失败，直接回复用户“启动 AI 会话失败”。
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFailedToStartAgentSession)) // 主动发送消息。
 		return
@@ -1849,6 +1860,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	// Apply per-message permission mode override (e.g. cron jobs with mode = "bypassPermissions").
 	// Defer restores only when SetLiveMode succeeds for the override.
 	if msg.ModeOverride != "" {
+		slog.Debug("[MODE] applying mode override", "session_key", interactiveKey, "mode", msg.ModeOverride)
 		if switcher, ok := state.agentSession.(LiveModeSwitcher); ok {
 			if switcher.SetLiveMode(msg.ModeOverride) {
 				defer func() {
@@ -1859,7 +1871,11 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 						}
 					}
 					switcher.SetLiveMode(defaultMode)
+					slog.Debug("[MODE] restored default mode", "session_key", interactiveKey, "mode", defaultMode)
 				}()
+				slog.Info("[MODE] mode override applied successfully", "session_key", interactiveKey, "mode", msg.ModeOverride)
+			} else {
+				slog.Warn("[MODE] failed to apply mode override", "session_key", interactiveKey, "mode", msg.ModeOverride)
 			}
 		}
 	}
@@ -1870,12 +1886,14 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	var stopTyping func()
 	if ti, ok := p.(TypingIndicator); ok {
 		stopTyping = ti.StartTyping(e.ctx, msg.ReplyCtx)
+		slog.Debug("[TYPING] started typing indicator", "session_key", interactiveKey)
 	}
 	defer func() {
 		// Stop typing if ownership was NOT transferred to processInteractiveEvents
 		// (i.e. an early return before that call).
 		if stopTyping != nil {
 			stopTyping()
+			slog.Debug("[TYPING] stopped typing indicator (deferred)", "session_key", interactiveKey)
 		}
 	}()
 
@@ -1883,16 +1901,20 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	// This prevents the next processInteractiveEvents from reading an old
 	// EventResult that was pushed after the previous turn already returned.
 	// 在发送新消息之前，先清理掉 AI 事件通道中可能残留的旧事件。这可以防止处理到过时的响应。
+	slog.Debug("[DRAIN] draining stale events before send", "session_key", interactiveKey)
 	drainEvents(state.agentSession.Events())
+	slog.Debug("[DRAIN] stale events drained", "session_key", interactiveKey)
 
 	// 将用户的消息内容、用户ID、平台信息等组合成一个完整的提示词，准备发送给 AI。
 	promptContent := e.buildSenderPrompt(msg.Content, msg.UserID, msg.Platform, msg.SessionKey)
+	slog.Debug("[PROMPT] built sender prompt", "session_key", interactiveKey, "prompt_len", len(promptContent))
 
 	sendStart := time.Now()
 	state.mu.Lock()
 	state.fromVoice = msg.FromVoice
 	state.sideText = ""
 	state.mu.Unlock()
+	slog.Debug("[STATE] updated state flags (fromVoice, sideText)", "session_key", interactiveKey, "from_voice", msg.FromVoice)
 
 	// Run Send concurrently with processInteractiveEvents. Some agents block inside
 	// Send until the prompt turn finishes (e.g. ACP session/prompt); they may emit
@@ -1900,11 +1922,21 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	// 在一个独立的 Goroutine 中发送消息给 AI 进程。这样做是为了避免阻塞主流程，因为某些 AI 进程可能会在 Send 调用中阻塞。
 	sendDone := make(chan error, 1)
 	go func() {
-		sendDone <- state.agentSession.Send(promptContent, msg.Images, msg.Files)
+		slog.Debug("[SEND] goroutine started: sending prompt to agent", "session_key", interactiveKey)
+		err := state.agentSession.Send(promptContent, msg.Images, msg.Files)
+		if err != nil {
+			slog.Error("[SEND] agent session send failed", "session_key", interactiveKey, "error", err)
+		} else {
+			slog.Debug("[SEND] agent session send completed", "session_key", interactiveKey)
+		}
+		sendDone <- err
 	}()
 
 	// 这是整个函数的核心循环。它会监听 AI 进程返回的各种事件（如回复、错误、权限请求等），并根据事件类型进行相应的处理（如回复用户、更新会话状态等）。
+	slog.Info("[LOOP] entering processInteractiveEvents", "session_key", interactiveKey)
 	e.processInteractiveEvents(state, session, sessions, interactiveKey, msg.MessageID, turnStart, stopTyping, sendDone, msg.ReplyCtx)
+	slog.Info("[LOOP] exited processInteractiveEvents", "session_key", interactiveKey, "elapsed", time.Since(turnStart))
+
 	if elapsed := time.Since(sendStart); elapsed >= slowAgentSend {
 		slog.Warn("slow agent send", "elapsed", elapsed, "session", msg.SessionKey, "content_len", len(msg.Content))
 	}
@@ -1914,8 +1946,10 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	// processInteractiveEvents observing an empty queue and returning here
 	// (session is still locked, so handleMessage's TryLock fails and routes
 	// the message to queueMessageForBusySession). Drain any such orphans.
+	slog.Debug("[DRAIN] checking for pending messages after loop", "session_key", interactiveKey)
 	if e.drainPendingMessages(state, session, sessions, interactiveKey) {
 		unlocked = true
+		slog.Info("[DRAIN] pending messages processed, session unlocked", "session_key", interactiveKey)
 	}
 }
 
@@ -1982,8 +2016,21 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 	e.interactiveMu.Lock()
 	defer e.interactiveMu.Unlock()
 
+	slog.Debug("[LOCK ACQUIRED] entering session state logic", "session_key", sessionKey)
+
 	// 它检查 sessionKey（比如你的飞书用户ID）是否已经有一个正在运行的 interactiveState（包含 AI 进程）。
 	state, ok := e.interactiveStates[sessionKey]
+
+	// 【新增日志】检查是否存在旧状态
+	if ok {
+		slog.Debug("[EXISTING STATE] found existing state entry",
+			"session_key", sessionKey,
+			"has_agent_session", state.agentSession != nil,
+			"is_alive", state.agentSession != nil && state.agentSession.Alive())
+	} else {
+		slog.Debug("[NEW STATE] no existing state found, will create new", "session_key", sessionKey)
+	}
+
 	if ok && state.agentSession != nil && state.agentSession.Alive() {
 		// Verify the running agent session matches the current active session.
 		// After /new or /switch the active session changes, but the old agent
@@ -1992,6 +2039,13 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 		// ... 检查 ID 是否匹配 ...
 		wantID := session.GetAgentSessionID()
 		currentID := state.agentSession.CurrentSessionID()
+
+		// 【新增日志】打印 ID 对比详情
+		slog.Debug("[ID CHECK] comparing session IDs",
+			"session_key", sessionKey,
+			"want_id", wantID,
+			"current_id", currentID)
+
 		// Reuse only when the live process matches what the Session expects:
 		// - IDs match (same Claude session), or
 		// - the process has not reported an ID yet (startup; empty want is OK).
@@ -2001,6 +2055,7 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 		// 如果你开启了新对话（/new），或者之前的进程 ID 和现在对不上，needRecycle 就会变成 true。
 		needRecycle := currentID != "" && (wantID == "" || wantID != currentID)
 		if !needRecycle {
+			slog.Info("[REUSE] reusing active agent session", "session_key", sessionKey)
 			return state // 进程活着且ID匹配，直接复用，函数结束
 		}
 		// Tear down the stale agent so we start one that matches the Session below.
@@ -2015,7 +2070,9 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 		// continues outputting while new agent starts (issue #327).
 		// 这个关闭过程可能会比较慢，或者如果进程卡死，它会强制关闭。
 		// 在关闭过程中，如果进程还有没处理完的消息，系统就会打印 drained stale events。
+		slog.Warn("[RECYCLE] starting close with timeout", "session_key", sessionKey)
 		e.closeAgentSessionWithTimeout(sessionKey, state.agentSession)
+		slog.Debug("[RECYCLE] close completed, deleting state", "session_key", sessionKey)
 		delete(e.interactiveStates, sessionKey)
 		ok = false // prevent reading stale settings below
 	}
@@ -2054,6 +2111,7 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 				envVars = append(envVars, "PATH="+binDir)
 			}
 		}
+		slog.Debug("[ENV] setting session environment variables", "session_key", sessionKey, "env_count", len(envVars))
 		inj.SetSessionEnv(envVars)
 	}
 
@@ -2065,12 +2123,13 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 		if fip, ok := p.(FormattingInstructionProvider); ok {
 			prompt = fip.FormattingInstructions()
 		}
+		slog.Debug("[PROMPT] setting platform prompt", "session_key", sessionKey, "prompt_len", len(prompt))
 		ppi.SetPlatformPrompt(prompt)
 	}
 
 	// Check if context is already canceled (e.g. during shutdown/restart)
 	if e.ctx.Err() != nil {
-		slog.Debug("skipping session start: context canceled", "session_key", sessionKey)
+		slog.Warn("[CTX] skipping session start: context canceled", "session_key", sessionKey)
 		state = &interactiveState{platform: p, replyCtx: replyCtx, quiet: quietMode}
 		e.interactiveStates[sessionKey] = state
 		return state
@@ -2082,6 +2141,13 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 	// 启动会话
 	startSessionID := session.GetAgentSessionID()
 	isResume := startSessionID != "" // 判断是不是恢复旧会话
+
+	// 【新增日志】启动前状态
+	slog.Info("[START] attempting to start agent session",
+		"session_key", sessionKey,
+		"is_resume", isResume,
+		"start_session_id", startSessionID)
+
 	startAt := time.Now()
 	agentSession, err := agent.StartSession(e.ctx, startSessionID)
 	startElapsed := time.Since(startAt)
@@ -2110,8 +2176,11 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 		slog.Warn("slow agent session start", "elapsed", startElapsed, "agent", agent.Name(), "session_id", startSessionID)
 	}
 
+	// 【新增日志】检查启动后的 ID
 	if newID := agentSession.CurrentSessionID(); newID != "" {
+		slog.Debug("[ID] agent session reported ID", "session_key", sessionKey, "new_id", newID)
 		if session.CompareAndSetAgentSessionID(newID, agent.Name()) {
+			slog.Debug("[PERSIST] saved session ID to disk", "session_key", sessionKey)
 			sessions.Save()
 		}
 	}
@@ -2125,7 +2194,7 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 	e.interactiveStates[sessionKey] = state
 
 	// 启动新代理成功
-	slog.Info("session spawned", "session_key", sessionKey, "agent_session", session.GetAgentSessionID(), "is_resume", isResume, "elapsed", startElapsed)
+	slog.Info("zztest session spawned", "session_key", sessionKey, "agent_session", session.GetAgentSessionID(), "is_resume", isResume, "elapsed", startElapsed)
 	return state
 }
 
@@ -2189,6 +2258,14 @@ func (e *Engine) closeAgentSessionWithTimeout(sessionKey string, agentSession Ag
 
 const defaultEventIdleTimeout = 2 * time.Hour
 
+// truncateString 截断字符串以便日志打印
+func truncateString(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "...(truncated)"
+}
+
 func (e *Engine) processInteractiveEvents(state *interactiveState, session *Session, sessions *SessionManager, sessionKey string, msgID string, turnStart time.Time, stopTypingFn func(), sendDone <-chan error, replyCtx any) {
 	var textParts []string
 	var segmentStart int // index into textParts: text before this has been sent/displayed
@@ -2203,6 +2280,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 	stopTyping := stopTypingFn
 	defer func() {
 		if stopTyping != nil {
+			slog.Debug("[TYPING] stopping typing indicator in defer", "session_key", sessionKey)
 			stopTyping()
 		}
 	}()
@@ -2213,6 +2291,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 	state.mu.Unlock()
 
 	// Idle timeout: 0 = disabled
+	slog.Info("[LOOP_INIT] processInteractiveEvents loop initialized", "session_key", sessionKey, "msg_id", msgID)
 	var idleTimer *time.Timer
 	var idleCh <-chan time.Time
 	if e.eventIdleTimeout > 0 {
@@ -2227,16 +2306,31 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 	for {
 		var event Event
 		var ok bool
+		slog.Debug("[SELECT] waiting for events", "session_key", sessionKey, "pending_send_nil", pendingSend == nil, "idle_timer_active", idleCh != nil)
 
 		select {
 		case <-stopCh:
+			slog.Info("[STOP] received stop signal, exiting loop", "session_key", sessionKey)
 			sp.discard()
 			return
 		case event, ok = <-events: // AI 进程发来的事件（这是主菜）。
 			if !ok {
+				slog.Warn("[EVENT] agent events channel closed", "session_key", sessionKey)
 				goto channelClosed
 			}
+			// 这行日志会把 Claude Code 进程发来的每一个字节都打印出来
+			slog.Debug("[RAW_FEED] Raw Event Received from Claude Code",
+				"session_key", sessionKey,
+				"event_type", event.Type,
+				"event_content_length", len(event.Content),
+				"event_content_sample", truncateString(event.Content, 200), // 如果内容太长只打印前200字
+				"tool_name", event.ToolName,
+				"tool_input", truncateString(event.ToolInput, 200),
+				"full_event_struct", fmt.Sprintf("%+v", event), // 关键：打印整个结构体
+			)
+			slog.Debug("[EVENT] received event from agent", "session_key", sessionKey, "event_type", event.Type, "event_len", len(event.Content), "tool_name", event.ToolName)
 		case err := <-pendingSend: // 之前发送消息给 AI 的动作是否出错（比如 AI 崩了）。简单说：是否发成功了，发送动作的反馈
+			slog.Debug("[SEND] received send operation result", "session_key", sessionKey, "has_error", err != nil)
 			pendingSend = nil
 			if err != nil {
 				slog.Error("failed to send prompt", "error", err, "session_key", sessionKey)
@@ -2268,10 +2362,12 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			e.cleanupInteractiveState(sessionKey, state)
 			return
 		case <-e.ctx.Done():
+			slog.Info("[CTX] engine context done, exiting events loop", "session_key", sessionKey)
 			return
 		}
 
 		if state.isStopped() {
+			slog.Debug("[STATE] state is stopped, exiting loop", "session_key", sessionKey)
 			sp.discard()
 			return
 		}
@@ -2285,6 +2381,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				}
 			}
 			idleTimer.Reset(e.eventIdleTimeout)
+			slog.Debug("[TIMER] idle timer reset", "session_key", sessionKey)
 		}
 
 		if !firstEventLogged {
@@ -2305,9 +2402,11 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 
 		quiet := globalQuiet || sessionQuiet
 
+		slog.Debug("[SWITCH] evaluating event type", "session_key", sessionKey, "event_type", event.Type, "quiet_mode", quiet)
 		switch event.Type {
 		case EventThinking: // 处理“思考中” (Thinking)
 			if !quiet && event.Content != "" {
+				slog.Debug("[THINKING] processing thinking event", "session_key", sessionKey, "content_len", len(event.Content))
 				// Flush accumulated text segment before thinking display
 				previewActive := sp.canPreview()
 				if len(textParts) > segmentStart {
@@ -2334,6 +2433,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 
 		case EventToolUse: // 显示 AI 调用的工具名称和参数
 			toolCount++
+			slog.Debug("[TOOL_USE] tool called", "session_key", sessionKey, "tool_name", event.ToolName, "tool_count", toolCount)
 			if !quiet && e.display.ToolMessages {
 				// Flush accumulated text segment before tool display
 				previewActive := sp.canPreview()
@@ -2379,6 +2479,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			}
 
 		case EventToolResult: // 显示工具运行后的结果
+			slog.Debug("[TOOL_RESULT] received tool result", "session_key", sessionKey, "tool_name", event.ToolName, "status", event.ToolStatus)
 			if !quiet && e.display.ToolMessages {
 				result := strings.TrimSpace(event.ToolResult)
 				if result == "" {
@@ -2411,8 +2512,10 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				if sp.canPreview() {
 					sp.appendText(event.Content)
 				}
+				slog.Debug("[TEXT] accumulated text chunk", "session_key", sessionKey, "current_parts", len(textParts), "chunk_len", len(event.Content))
 			}
 			if event.SessionID != "" {
+				slog.Debug("[SESSION] received agent session ID", "session_key", sessionKey, "agent_session_id", event.SessionID)
 				if session.CompareAndSetAgentSessionID(event.SessionID, e.agent.Name()) {
 					pendingName := session.GetName()
 					if pendingName != "" && pendingName != "session" && pendingName != "default" {
@@ -2429,7 +2532,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			state.mu.Lock()
 			autoApprove := state.approveAll
 			state.mu.Unlock()
-
+			slog.Debug("[PERM] permission request received", "session_key", sessionKey, "tool_name", event.ToolName, "is_ask_question", isAskQuestion, "auto_approve", autoApprove)
 			if autoApprove && !isAskQuestion {
 				slog.Debug("auto-approving (approve-all)", "request_id", event.RequestID, "tool", event.ToolName)
 				_ = state.agentSession.RespondPermission(event.RequestID, PermissionResult{
@@ -2503,6 +2606,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 
 		case EventResult: // 处理“最终结果” (EventResult)
 			// 这是 AI 说完最后一句话的时候。它会把之前所有零散的 EventText 拼起来，存入历史记录，并一次性发给用户。
+			slog.Info("[RESULT] final result event received, finalizing turn", "session_key", sessionKey, "text_parts_count", len(textParts), "tool_count", toolCount)
 			cp.Finalize(ProgressCardStateCompleted)
 			if event.SessionID != "" {
 				session.SetAgentSessionID(event.SessionID, e.agent.Name())
@@ -2551,7 +2655,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			fullResponse = cleanResponse
 
 			turnDuration := time.Since(turnStart)
-			slog.Info("turn complete",
+			slog.Info("zztest turn complete",
 				"session", session.ID,
 				"agent_session", session.GetAgentSessionID(),
 				"msg_id", msgID,
@@ -2615,6 +2719,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			} else {
 				slog.Debug("tts: not enabled", "tts_nil", e.tts == nil, "enabled", e.tts != nil && e.tts.Enabled, "tts_obj_nil", e.tts == nil || e.tts.TTS == nil)
 			}
+			slog.Debug("EventResult: sending final response", "response_len", len(fullResponse), "chunks", len(splitMessage(fullResponse, maxPlatformMessageLen)))
 
 			// Auto-compress after finishing a turn, before sending any queued messages.
 			if triggerAutoCompress {
@@ -2627,7 +2732,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				state.lastAutoCompressAt = time.Now()
 				state.mu.Unlock()
 				slog.Info("auto-compress: triggering", "session", sessionKey)
-
+				slog.Info("auto-compress: triggering 2", "session", sessionKey, "estimated_tokens", state.lastAutoCompressTokens)
 				// Run compress inline while the session is still locked.
 				e.runCompress(state, session, sessions, sessionKey, state.platform, state.replyCtx, true)
 				return
@@ -2637,6 +2742,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			// for the next turn instead of returning.
 			state.mu.Lock()
 			if len(state.pendingMessages) > 0 {
+				slog.Info("[QUEUE] queued messages found, switching to next turn", "session_key", sessionKey, "queue_size", len(state.pendingMessages))
 				queued := state.pendingMessages[0]
 				state.pendingMessages = state.pendingMessages[1:]
 				remainingQueue := len(state.pendingMessages)
@@ -2653,13 +2759,14 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				// Start a new typing indicator for the queued message's context
 				if ti, ok := queued.platform.(TypingIndicator); ok {
 					stopTyping = ti.StartTyping(e.ctx, queued.replyCtx)
+					slog.Debug("[TYPING] started typing for queued message", "session_key", sessionKey)
 				}
 
 				// Drain stale events before starting the next turn. Between
 				// EventResult and Send(), the only buffered events would be
 				// stale leftovers (e.g. a deferred EventError from cmd.Wait()).
 				drainEvents(state.agentSession.Events())
-
+				slog.Debug("[DRAIN] drained stale events before next turn", "session_key", sessionKey)
 				if pendingSend != nil {
 					if err := <-pendingSend; err != nil {
 						slog.Debug("async send error before queued turn", "error", err)
@@ -2699,7 +2806,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 					}
 					idleTimer.Reset(e.eventIdleTimeout)
 				}
-
+				slog.Debug("[NEXT_TURN] starting next turn in current loop", "session_key", sessionKey, "remaining_queue", remainingQueue)
 				slog.Info("processing queued message",
 					"session", sessionKey,
 					"remaining_queue", remainingQueue,
@@ -2707,7 +2814,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				continue
 			}
 			state.mu.Unlock()
-
+			slog.Debug("[LOOP] no queued messages, preparing to exit loop", "session_key", sessionKey)
 			if pendingSend != nil {
 				if err := <-pendingSend; err != nil {
 					slog.Debug("async send error after EventResult", "error", err)
@@ -2717,6 +2824,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 
 		case EventError:
 			// 如果 AI 进程内部报错（比如 Python 代码语法错误），AI 会发一个 EventError，这里负责把这个错误展示给用户。
+			slog.Error("[ERROR] agent error event received", "session_key", sessionKey, "error", event.Error, "agent_alive", state.agentSession.Alive())
 			cp.Finalize(ProgressCardStateFailed)
 			sp.discard()
 			if event.Error != nil {
