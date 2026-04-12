@@ -68,7 +68,8 @@ func newClaudeSession(ctx context.Context, workDir, model, sessionID, mode strin
 	default:
 		// Resuming a known session ID — this is cc-connect's own session
 		// from a previous connection, safe to resume directly.
-		args = append(args, "--resume", sessionID)
+		// 之前docker里一直失败就是应为这个
+		//args = append(args, "--resume", sessionID)
 	}
 	if model != "" {
 		args = append(args, "--model", model)
