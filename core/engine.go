@@ -800,6 +800,8 @@ func (e *Engine) ActiveSessionKeys() []string {
 // ExecuteCronJob runs a cron job by injecting a synthetic message into the engine.
 // It finds the platform that owns the session key, reconstructs a reply context,
 // and processes the message as if the user sent it.
+// cc-connect 实现“无人值守、自动运行”能力的底层逻辑。它让 AI 不仅能“被动问答”，还能“主动干活”。
+// 通过 /cron 指令设置定时任务
 func (e *Engine) ExecuteCronJob(job *CronJob) error {
 	sessionKey := job.SessionKey
 	platformName := ""
@@ -1039,11 +1041,20 @@ func (e *Engine) Start() error {
 	readyCount := 0
 	pendingCount := 0
 	for _, p := range e.platforms {
+		/*
+			它只关心“是不是”（布尔值 isAsync）。
+			它把具体的接口对象丢弃了（用 _ 接收）。
+			目的：仅仅是为了后面做逻辑判断（比如决定是计入 pendingCount 还是直接标记为 ready）。
+		*/
 		_, isAsync := p.(AsyncRecoverablePlatform)
+		/*
+			它不仅关心“是不是”（ok），还关心“是谁”（async）。
+			目的：只有拿到了转换后的 async 对象，才能调用它的方法 SetLifecycleHandler(e)。
+		*/
 		if async, ok := p.(AsyncRecoverablePlatform); ok {
 			async.SetLifecycleHandler(e)
 		}
-		if err := p.Start(e.handleMessage); err != nil {
+		if err := p.Start(e.handleMessage); err != nil { // 真正启动飞书平台监听开始处理消息了。
 			slog.Warn("platform start failed", "project", e.name, "platform", p.Name(), "error", err)
 			startErrs = append(startErrs, fmt.Errorf("[%s] start platform %s: %w", e.name, p.Name(), err))
 			continue

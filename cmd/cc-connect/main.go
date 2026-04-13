@@ -162,6 +162,15 @@ func main() {
 		}
 
 		var platforms []core.Platform
+		/*
+				// 在 ~/.cc-connect/config.toml 中配置：
+				[[projects.platforms]]
+			    	type = "feishu"
+
+			    	[projects.platforms.options]
+			      		app_id = "cli_a9269ca767389cb0"
+			      		app_secret = "E4Qx5n00tdw4RAef0jJ6rgkfdmBK5yIr"
+		*/
 		for _, pc := range proj.Platforms {
 			opts := make(map[string]any, len(pc.Options)+2)
 			for k, v := range pc.Options {
@@ -608,7 +617,7 @@ func main() {
 
 	var startErrors []error
 	for _, e := range engines {
-		if err := e.Start(); err != nil {
+		if err := e.Start(); err != nil { // 真正启动engine!
 			slog.Warn("engine start partially failed (some platforms may be unavailable)", "error", err)
 			startErrors = append(startErrors, err)
 		}

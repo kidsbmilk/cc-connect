@@ -106,19 +106,19 @@ type replyContext struct {
 }
 
 type Platform struct {
-	platformName          string
-	domain                string
-	appID                 string
-	appSecret             string
-	progressStyle         string
-	useInteractiveCard    bool
-	self                  core.Platform
-	reactionEmoji         string
-	allowFrom             string
+	platformName               string
+	domain                     string
+	appID                      string
+	appSecret                  string
+	progressStyle              string
+	useInteractiveCard         bool
+	self                       core.Platform
+	reactionEmoji              string
+	allowFrom                  string
 	groupReplyAll              bool
 	respondToAtEveryoneAndHere bool
-	shareSessionInChannel bool
-	threadIsolation       bool
+	shareSessionInChannel      bool
+	threadIsolation            bool
 	// noReplyToTrigger: when true, send via Create instead of Im.Message.Reply (no quote to the user's message).
 	noReplyToTrigger bool
 	client           *lark.Client
@@ -220,24 +220,24 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 	}
 
 	base := &Platform{
-		platformName:          name,
-		domain:                domain,
-		appID:                 appID,
-		appSecret:             appSecret,
-		progressStyle:         progressStyle,
-		useInteractiveCard:    useInteractiveCard,
-		reactionEmoji:         reactionEmoji,
-		allowFrom:             allowFrom,
+		platformName:               name,
+		domain:                     domain,
+		appID:                      appID,
+		appSecret:                  appSecret,
+		progressStyle:              progressStyle,
+		useInteractiveCard:         useInteractiveCard,
+		reactionEmoji:              reactionEmoji,
+		allowFrom:                  allowFrom,
 		groupReplyAll:              groupReplyAll,
 		respondToAtEveryoneAndHere: respondToAtEveryoneAndHere,
-		shareSessionInChannel: shareSessionInChannel,
-		threadIsolation:       threadIsolation,
-		noReplyToTrigger:      noReplyToTrigger,
-		client:                lark.NewClient(appID, appSecret, clientOpts...),
-		replayClient:          newFeishuReplayClient(appID, appSecret, domain),
-		port:                  port,
-		callbackPath:          callbackPath,
-		encryptKey:            encryptKey,
+		shareSessionInChannel:      shareSessionInChannel,
+		threadIsolation:            threadIsolation,
+		noReplyToTrigger:           noReplyToTrigger,
+		client:                     lark.NewClient(appID, appSecret, clientOpts...),
+		replayClient:               newFeishuReplayClient(appID, appSecret, domain),
+		port:                       port,
+		callbackPath:               callbackPath,
+		encryptKey:                 encryptKey,
 	}
 	if !useInteractiveCard {
 		base.self = base
@@ -267,6 +267,7 @@ func (p *Platform) KeepPreviewOnFinish() bool {
 	return p.useInteractiveCard
 }
 
+// 启动飞书监听，开始处理消息。
 func (p *Platform) Start(handler core.MessageHandler) error {
 	p.handler = handler
 
@@ -277,6 +278,7 @@ func (p *Platform) Start(handler core.MessageHandler) error {
 		slog.Info(p.platformName+": bot identified", "open_id", openID)
 	}
 
+	// dispatcher 是飞书的官方库
 	p.eventHandler = dispatcher.NewEventDispatcher("", p.encryptKey).
 		OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 			slog.Debug(p.platformName+": message received", "app_id", p.appID)
@@ -312,7 +314,7 @@ func (p *Platform) Start(handler core.MessageHandler) error {
 		return p.startWebhookMode()
 	}
 
-	return p.startWebSocketMode()
+	return p.startWebSocketMode() // 启动websocket
 }
 
 // startWebSocketMode starts the WebSocket long connection mode (for Feishu domestic version)
@@ -325,11 +327,12 @@ func (p *Platform) startWebSocketMode() error {
 	if p.domain != lark.FeishuBaseUrl {
 		wsOpts = append(wsOpts, larkws.WithDomain(p.domain))
 	}
-	p.wsClient = larkws.NewClient(p.appID, p.appSecret, wsOpts...)
+	p.wsClient = larkws.NewClient(p.appID, p.appSecret, wsOpts...) // 连接到官方服务器
 
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
 
+	// 永不退出，p.wsClient.Start(ctx) 内部是for循环
 	go func() {
 		if err := p.wsClient.Start(ctx); err != nil {
 			slog.Error(p.tag()+": websocket error", "error", err)
@@ -394,6 +397,8 @@ func (p *Platform) webhookHandler(w http.ResponseWriter, r *http.Request) {
 //   - nav:/xxx   — render a card page and update the original card in-place
 //   - act:/xxx   — execute an action, then render and update the card in-place
 //   - cmd:/xxx   — legacy: dispatch as a user command (sends a new message)
+//
+// TODO: 飞书上的允许、拒绝等卡片消息执行失败，应该是要改这里。
 func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callback.CardActionTriggerResponse, error) {
 	if event.Event == nil || event.Event.Action == nil {
 		return nil, nil
@@ -746,6 +751,7 @@ func (p *Platform) dispatchMessage(msgType, content string, mentions []*larkim.M
 			)
 			return
 		}
+		// 调度飞书消息，用 e.handleMessage -> ai agent 进一步处理消息。
 		p.handler(p.dispatchPlatform(), &core.Message{
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
@@ -802,7 +808,7 @@ func (p *Platform) dispatchMessage(msgType, content string, mentions []*larkim.M
 			ReplyCtx: rctx,
 		})
 
-	case "post":
+	case "post": // 富文本/卡片
 		textParts, images := p.parsePostContent(messageID, content)
 		text := stripMentions(strings.Join(textParts, "\n"), mentions, p.botOpenID)
 		if text == "" && len(images) == 0 {
@@ -845,7 +851,7 @@ func (p *Platform) dispatchMessage(msgType, content string, mentions []*larkim.M
 			ReplyCtx: rctx,
 		})
 
-	case "merge_forward":
+	case "merge_forward": // 合并转发
 		text, images, files := p.parseMergeForward(messageID)
 		if text == "" && len(images) == 0 && len(files) == 0 {
 			slog.Warn(p.tag()+": merge_forward produced no content", "message_id", messageID)
