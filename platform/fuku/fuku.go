@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,7 +44,8 @@ func New(opts map[string]any) (core.Platform, error) {
 	wsURL, _ := opts["ws_url"].(string)
 	if wsURL == "" {
 		// 用 127.0.0.1不行。
-		wsURL = "ws://localhost:3000/ws?container_id=336b3463b2bad448e8ee98131fc68b44debd2859f59bb00338543dc6dcbd53a4"
+		//wsURL = "ws://localhost:3000/ws?conversation_id=" + os.Getenv("CONVERSATION_ID") + "&is_container=true"
+		wsURL = "ws://host.docker.internal:3000/ws?conversation_id=" + os.Getenv("CONVERSATION_ID") + "&is_container=true"
 	}
 	token, _ := opts["token"].(string)
 	allowFrom, _ := opts["allow_from"].(string)
