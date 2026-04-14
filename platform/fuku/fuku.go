@@ -106,7 +106,7 @@ func (p *Platform) readLoop(ctx context.Context) {
 		if json.Unmarshal(raw, &payload) != nil {
 			continue
 		}
-		slog.Info("fuku: ws read message", "raw", string(raw))
+		//slog.Info("fuku: ws read message", "raw", string(raw))
 		slog.Info("fuku: ws read message2", "payload", payload)
 
 		// If this is an API response (has "echo" field), route to caller
@@ -120,7 +120,7 @@ func (p *Platform) readLoop(ctx context.Context) {
 		}
 
 		// Otherwise it's an event
-		postType, _ := payload["post_type"].(string)
+		postType, _ := payload["type"].(string)
 		if postType == "message" {
 			p.handleMessage(payload)
 		}
@@ -149,10 +149,11 @@ func (p *Platform) reconnect() {
 }
 
 func (p *Platform) handleMessage(payload map[string]any) {
-	msgType, _ := payload["message_type"].(string)
+	msgType, _ := payload["type"].(string)
 	conversationId, _ := payload["conversation_id"].(string)
 	messageID := jsonInt64(payload, "message_id")
-	userID := jsonInt64(payload, "user_id")
+	//userID := jsonInt64(payload, "user_id")
+	userID := int64(123)
 	//
 	//if userID == p.selfID {
 	//	return
@@ -178,6 +179,7 @@ func (p *Platform) handleMessage(payload map[string]any) {
 	// Parse message content from CQ message array or raw_message
 	text, images, audio := p.parseMessage(payload)
 	if text == "" && len(images) == 0 && audio == nil {
+		slog.Debug("fuku: ignoring message ignored", "message_id", messageID)
 		return
 	}
 
@@ -292,67 +294,69 @@ func (p *Platform) parseMessage(payload map[string]any) (string, []core.ImageAtt
 	var images []core.ImageAttachment
 	var audio *core.AudioAttachment
 
+	// 目前fuku只有文本消息
+	textParts = append(textParts, payload["content"].(string))
 	// OneBot message can be array of segments or a string
-	switch msg := payload["message"].(type) {
-	case []any:
-		for _, seg := range msg {
-			s, ok := seg.(map[string]any)
-			if !ok {
-				continue
-			}
-			segType, _ := s["type"].(string)
-			data, _ := s["data"].(map[string]any)
-			if data == nil {
-				continue
-			}
-
-			switch segType {
-			case "text":
-				if text, ok := data["text"].(string); ok {
-					textParts = append(textParts, text)
-				}
-			//case "image":
-			//	if url, ok := data["url"].(string); ok && url != "" {
-			//		imgData, mime, err := downloadFile(url)
-			//		if err != nil {
-			//			slog.Warn("fuku: download image failed", "error", err)
-			//			continue
-			//		}
-			//		images = append(images, core.ImageAttachment{
-			//			MimeType: mime,
-			//			Data:     imgData,
-			//		})
-			//	}
-			//case "record":
-			//	if url, ok := data["url"].(string); ok && url != "" {
-			//		audioData, _, err := downloadFile(url)
-			//		if err != nil {
-			//			slog.Warn("fuku: download audio failed", "error", err)
-			//			continue
-			//		}
-			//		format := "silk"
-			//		if f, ok := data["file"].(string); ok {
-			//			if strings.HasSuffix(f, ".amr") {
-			//				format = "amr"
-			//			} else if strings.HasSuffix(f, ".mp3") {
-			//				format = "mp3"
-			//			}
-			//		}
-			//		audio = &core.AudioAttachment{
-			//			Data:   audioData,
-			//			Format: format,
-			//		}
-			//	}
-			case "at":
-				// Ignore @mentions in parsed text
-			}
-		}
-	default:
-		// raw_message fallback (string with CQ codes)
-		//if raw, ok := payload["raw_message"].(string); ok {
-		//	textParts = append(textParts, stripCQCodes(raw))
-		//}
-	}
+	//switch msg := payload["message"].(type) {
+	//case []any:
+	//	for _, seg := range msg {
+	//		s, ok := seg.(map[string]any)
+	//		if !ok {
+	//			continue
+	//		}
+	//		segType, _ := s["type"].(string)
+	//		data, _ := s["data"].(map[string]any)
+	//		if data == nil {
+	//			continue
+	//		}
+	//
+	//		switch segType {
+	//		case "text":
+	//			if text, ok := data["text"].(string); ok {
+	//				textParts = append(textParts, text)
+	//			}
+	//		//case "image":
+	//		//	if url, ok := data["url"].(string); ok && url != "" {
+	//		//		imgData, mime, err := downloadFile(url)
+	//		//		if err != nil {
+	//		//			slog.Warn("fuku: download image failed", "error", err)
+	//		//			continue
+	//		//		}
+	//		//		images = append(images, core.ImageAttachment{
+	//		//			MimeType: mime,
+	//		//			Data:     imgData,
+	//		//		})
+	//		//	}
+	//		//case "record":
+	//		//	if url, ok := data["url"].(string); ok && url != "" {
+	//		//		audioData, _, err := downloadFile(url)
+	//		//		if err != nil {
+	//		//			slog.Warn("fuku: download audio failed", "error", err)
+	//		//			continue
+	//		//		}
+	//		//		format := "silk"
+	//		//		if f, ok := data["file"].(string); ok {
+	//		//			if strings.HasSuffix(f, ".amr") {
+	//		//				format = "amr"
+	//		//			} else if strings.HasSuffix(f, ".mp3") {
+	//		//				format = "mp3"
+	//		//			}
+	//		//		}
+	//		//		audio = &core.AudioAttachment{
+	//		//			Data:   audioData,
+	//		//			Format: format,
+	//		//		}
+	//		//	}
+	//		case "at":
+	//			// Ignore @mentions in parsed text
+	//		}
+	//	}
+	//default:
+	//	// raw_message fallback (string with CQ codes)
+	//	//if raw, ok := payload["raw_message"].(string); ok {
+	//	//	textParts = append(textParts, stripCQCodes(raw))
+	//	//}
+	//}
 
 	return strings.TrimSpace(strings.Join(textParts, "")), images, audio
 }

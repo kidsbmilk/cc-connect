@@ -1255,7 +1255,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		"content_len", len(msg.Content),
 		"has_images", len(msg.Images) > 0, "has_audio", msg.Audio != nil, "has_files", len(msg.Files) > 0,
 	)
-	e.reply(p, msg.ReplyCtx, e.i18n.T("zztest received")) // 主动发送消息。
+	//e.reply(p, msg.ReplyCtx, e.i18n.T("zztest received")) // 主动发送消息。
 
 	// Voice message: transcribe to text first
 	if msg.Audio != nil {
