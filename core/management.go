@@ -114,6 +114,7 @@ func (m *ManagementServer) Start() {
 	mux := http.NewServeMux()
 	handler := m.buildHandler(mux)
 
+	// 自己手写的 httpServer 实现，没有使用 gin 之类的 web 框架。
 	m.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", m.port),
 		Handler: handler,

@@ -2656,6 +2656,12 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			session.AddHistory("assistant", cleanResponse)
 			sessions.Save()
 
+			/*
+				[[projects]]
+				name = "my-backend"
+				# show_context_indicator = false  # Hide the “[ctx: ~N%]” suffix on assistant replies (default: true / show)
+				#                                   # 不在助手回复末尾显示「[ctx: ~N%]」上下文占用提示（默认 true 显示）
+			*/
 			if e.showContextIndicator {
 				if sdkPlausible {
 					cleanResponse += contextIndicator(event.InputTokens)
