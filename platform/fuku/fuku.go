@@ -45,7 +45,8 @@ func New(opts map[string]any) (core.Platform, error) {
 	if wsURL == "" {
 		// 用 127.0.0.1不行。
 		//wsURL = "ws://localhost:3000/ws?conversation_id=" + os.Getenv("CONVERSATION_ID") + "&is_container=true"
-		wsURL = "ws://host.docker.internal:3000/ws?conversation_id=" + os.Getenv("CONVERSATION_ID") + "&is_container=true"
+		// wsURL = "ws://host.docker.internal:3000/ws?conversation_id=" + os.Getenv("CONVERSATION_ID") + "&is_container=true"
+		wsURL = "ws://34.124.162.87:11000/ws?conversation_id=" + os.Getenv("CONVERSATION_ID") + "&is_container=true"
 	}
 	token, _ := opts["token"].(string)
 	allowFrom, _ := opts["allow_from"].(string)
