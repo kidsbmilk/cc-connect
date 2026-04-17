@@ -43,10 +43,12 @@ type Platform struct {
 func New(opts map[string]any) (core.Platform, error) {
 	wsURL, _ := opts["ws_url"].(string)
 	if wsURL == "" {
-		// 用 127.0.0.1不行。
+		// 本地宿主机用127.0.0.1不行，需要使用localhost。
 		//wsURL = "ws://localhost:3000/ws?conversation_id=" + os.Getenv("CONVERSATION_ID") + "&is_container=true"
-		// wsURL = "ws://host.docker.internal:3000/ws?conversation_id=" + os.Getenv("CONVERSATION_ID") + "&is_container=true"
-		wsURL = "ws://34.124.162.87:11000/ws?conversation_id=" + os.Getenv("CONVERSATION_ID") + "&is_container=true"
+		// 本地容器内配置
+		wsURL = "ws://host.docker.internal:3000/ws?conversation_id=" + os.Getenv("CONVERSATION_ID") + "&is_container=true"
+		// 线上容器内配置
+		// wsURL = "ws://34.124.162.87:11000/ws?conversation_id=" + os.Getenv("CONVERSATION_ID") + "&is_container=true"
 	}
 	token, _ := opts["token"].(string)
 	allowFrom, _ := opts["allow_from"].(string)
