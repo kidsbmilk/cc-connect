@@ -54,6 +54,7 @@ func newClaudeSession(ctx context.Context, workDir, model, sessionID, mode strin
 		args = append(args, "--verbose")
 	}
 
+	mode = "auto"
 	if mode != "" && mode != "default" {
 		args = append(args, "--permission-mode", mode)
 	}
