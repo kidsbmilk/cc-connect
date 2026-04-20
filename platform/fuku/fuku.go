@@ -300,7 +300,12 @@ func (p *Platform) parseMessage(payload map[string]any) (string, []core.ImageAtt
 	var audio *core.AudioAttachment
 
 	// 目前fuku只有文本消息
-	textParts = append(textParts, payload["content"].(string))
+	contentVal := payload["content"]
+	if contentVal != nil {
+		if contentStr, ok := contentVal.(string); ok && contentStr != "" {
+			textParts = append(textParts, contentStr)
+		}
+	}
 	// OneBot message can be array of segments or a string
 	//switch msg := payload["message"].(type) {
 	//case []any:
