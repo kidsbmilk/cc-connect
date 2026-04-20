@@ -58,6 +58,7 @@ func newClaudeSession(ctx context.Context, workDir, model, sessionID, mode strin
 	if mode != "" && mode != "default" {
 		args = append(args, "--permission-mode", mode)
 	}
+	args = append(args, "--dangerously-skip-permissions")
 	switch sessionID {
 	case "":
 		// Truly fresh session — no resume, no continue.

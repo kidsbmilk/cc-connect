@@ -48,7 +48,7 @@ func New(opts map[string]any) (core.Platform, error) {
 		// 本地容器内配置
 		wsURL = "ws://host.docker.internal:3000/ws?conversation_id=" + os.Getenv("CONVERSATION_ID") + "&is_container=true"
 		// 线上容器内配置
-		// wsURL = "ws://34.124.162.87:11000/ws?conversation_id=" + os.Getenv("CONVERSATION_ID") + "&is_container=true"
+		// wsURL = "ws://chat.zipclaw.org/ws?conversation_id=" + os.Getenv("CONVERSATION_ID") + "&is_container=true"
 	}
 	token, _ := opts["token"].(string)
 	allowFrom, _ := opts["allow_from"].(string)
