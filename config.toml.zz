@@ -36,6 +36,11 @@ model = ""
 api_key = ""
 model = ""
 
+[speech]
+enabled = true
+provider = "qwen"    # "openai", "groq", or "qwen" / "openai"、"groq" 或 "qwen"
+language = ""          # e.g. "zh", "en"; empty = auto-detect / 如 "zh"、"en"；留空自动检测
+
 [speech.qwen]
 api_key = "sk-cef11775b9d44c8b81d85cd58d5b8d41"
 base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"

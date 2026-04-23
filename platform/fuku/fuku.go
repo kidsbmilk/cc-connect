@@ -129,7 +129,7 @@ func (p *Platform) readLoop(ctx context.Context) {
 
 		// Otherwise it's an event
 		postType, _ := payload["type"].(string)
-		if postType == "message" {
+		if postType == "message" || postType == "audio" {
 			p.handleMessage(payload)
 		}
 	}
@@ -322,7 +322,10 @@ func (p *Platform) parseMessage(payload map[string]any) (string, []core.ImageAtt
 		}
 	case "audio":
 		filePath, _ := payload["content"].(string)
-		fmt.Printf("fuku: parsing audio filePath: %s\n", filePath)
+		name := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+		filePath = fmt.Sprintf("/Users/zhangzhen/zzworkspace/claude_ws/audios/%s.mp3", name)
+		// fuku: parsing audio filePath: 31598678388778@lid_3AEB207FAD34F75516B1_5
+		fmt.Printf("fuku: parsing audio filePath: %s\n", name)
 		// 读取audio文件
 		file, err := os.Open(filePath)
 		if err != nil {
@@ -339,14 +342,14 @@ func (p *Platform) parseMessage(payload map[string]any) (string, []core.ImageAtt
 		}
 
 		audio = &core.AudioAttachment{
-			MimeType: "audio/opus",
+			MimeType: "audio/mpeg",
 			Data:     audioData,
-			Format:   "ogg",
+			Format:   "mp3",
 		}
 
-		duration, err := extractDuration(filePath)
+		duration, err := extractDuration(name)
 		if err != nil {
-			fmt.Printf("从 %s 提取时长失败: %v\n", filePath, err)
+			fmt.Printf("从 %s 提取时长失败: %v\n", name, err)
 		} else if duration > 0 {
 			audio.Duration = duration
 		}
@@ -355,8 +358,7 @@ func (p *Platform) parseMessage(payload map[string]any) (string, []core.ImageAtt
 	return strings.TrimSpace(strings.Join(textParts, "")), images, audio
 }
 
-func extractDuration(path string) (int, error) {
-	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+func extractDuration(name string) (int, error) {
 	parts := strings.Split(name, "_")
 
 	if len(parts) == 0 {
