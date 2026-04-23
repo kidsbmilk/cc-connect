@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -298,6 +299,15 @@ func (p *Platform) parseMessage(payload map[string]any) (string, []core.ImageAtt
 	var textParts []string
 	var images []core.ImageAttachment
 	var audio *core.AudioAttachment
+	slog.Info("fuku: parseMessage", "payload", payload)
+
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("fuku: panic recovered in readLoop", "panic", r)
+			// 可以在这里添加堆栈打印，方便调试
+			debug.PrintStack()
+		}
+	}()
 
 	// 目前fuku只有文本消息
 	contentVal := payload["content"]
