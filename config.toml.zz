@@ -1,0 +1,82 @@
+data_dir = ""
+attachment_send = ""
+language = "zh"
+
+[[projects]]
+name = "my-claude"
+admin_from = "ou_3992bfebed7ba39d82f978d9bae9f935"
+
+[projects.agent]
+type = "claudecode"
+
+[projects.agent.options]
+work_dir = "/Users/zhangzhen/zzworkspace"
+
+[[projects.platforms]]
+type = "fuku"
+
+[projects.platforms.options]
+app_id = "cli_a9269ca767389cb0"
+app_secret = "E4Qx5n00tdw4RAef0jJ6rgkfdmBK5yIr"
+
+[log]
+level = ""
+
+[speech]
+enabled = false
+provider = ""
+language = ""
+
+[speech.openai]
+api_key = ""
+base_url = ""
+model = ""
+
+[speech.groq]
+api_key = ""
+model = ""
+
+[speech.qwen]
+api_key = "sk-cef11775b9d44c8b81d85cd58d5b8d41"
+base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+model = "qwen3-asr-flash"
+
+[tts]
+enabled = false
+provider = ""
+voice = ""
+tts_mode = ""
+max_text_len = 0
+
+[tts.openai]
+api_key = ""
+base_url = ""
+model = ""
+
+[tts.qwen]
+api_key = ""
+base_url = ""
+model = ""
+
+[tts.minimax]
+api_key = ""
+base_url = ""
+model = ""
+
+[cron]
+session_mode = ""
+
+[webhook]
+port = 0
+
+[bridge]
+enabled = true
+port = 9810
+token = "9fd915b935824ed0cb20f71b06cd9774"
+cors_origins = ["*"]
+
+[management]
+enabled = true
+port = 9820
+token = "007910c74f87235d4dc0509fc35971e5"
+cors_origins = ["*"]
