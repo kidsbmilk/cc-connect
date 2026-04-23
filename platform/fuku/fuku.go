@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -308,77 +310,60 @@ func (p *Platform) parseMessage(payload map[string]any) (string, []core.ImageAtt
 			debug.PrintStack()
 		}
 	}()
+	msgType, _ := payload["type"].(string)
+	switch msgType {
+	case "message":
+		// 目前fuku只有文本消息
+		contentVal := payload["content"]
+		if contentVal != nil {
+			if contentStr, ok := contentVal.(string); ok && contentStr != "" {
+				textParts = append(textParts, contentStr)
+			}
+		}
+	case "audio":
+		filePath, _ := payload["content"].(string)
+		fmt.Printf("fuku: parsing audio filePath: %s\n", filePath)
+		// 读取audio文件
+		file, err := os.Open(filePath)
+		if err != nil {
+			fmt.Println("打开文件失败:", err)
+			break
+		}
+		defer func(file *os.File) {
+			_ = file.Close()
+		}(file)
 
-	// 目前fuku只有文本消息
-	contentVal := payload["content"]
-	if contentVal != nil {
-		if contentStr, ok := contentVal.(string); ok && contentStr != "" {
-			textParts = append(textParts, contentStr)
+		audioData, err := io.ReadAll(file)
+		if err != nil {
+			fmt.Printf("%s: read resource err: %v", filePath, err)
+		}
+
+		audio = &core.AudioAttachment{
+			MimeType: "audio/opus",
+			Data:     audioData,
+			Format:   "ogg",
+		}
+
+		duration, err := extractDuration(filePath)
+		if err != nil {
+			fmt.Printf("从 %s 提取时长失败: %v\n", filePath, err)
+		} else if duration > 0 {
+			audio.Duration = duration
 		}
 	}
-	// OneBot message can be array of segments or a string
-	//switch msg := payload["message"].(type) {
-	//case []any:
-	//	for _, seg := range msg {
-	//		s, ok := seg.(map[string]any)
-	//		if !ok {
-	//			continue
-	//		}
-	//		segType, _ := s["type"].(string)
-	//		data, _ := s["data"].(map[string]any)
-	//		if data == nil {
-	//			continue
-	//		}
-	//
-	//		switch segType {
-	//		case "text":
-	//			if text, ok := data["text"].(string); ok {
-	//				textParts = append(textParts, text)
-	//			}
-	//		//case "image":
-	//		//	if url, ok := data["url"].(string); ok && url != "" {
-	//		//		imgData, mime, err := downloadFile(url)
-	//		//		if err != nil {
-	//		//			slog.Warn("fuku: download image failed", "error", err)
-	//		//			continue
-	//		//		}
-	//		//		images = append(images, core.ImageAttachment{
-	//		//			MimeType: mime,
-	//		//			Data:     imgData,
-	//		//		})
-	//		//	}
-	//		//case "record":
-	//		//	if url, ok := data["url"].(string); ok && url != "" {
-	//		//		audioData, _, err := downloadFile(url)
-	//		//		if err != nil {
-	//		//			slog.Warn("fuku: download audio failed", "error", err)
-	//		//			continue
-	//		//		}
-	//		//		format := "silk"
-	//		//		if f, ok := data["file"].(string); ok {
-	//		//			if strings.HasSuffix(f, ".amr") {
-	//		//				format = "amr"
-	//		//			} else if strings.HasSuffix(f, ".mp3") {
-	//		//				format = "mp3"
-	//		//			}
-	//		//		}
-	//		//		audio = &core.AudioAttachment{
-	//		//			Data:   audioData,
-	//		//			Format: format,
-	//		//		}
-	//		//	}
-	//		case "at":
-	//			// Ignore @mentions in parsed text
-	//		}
-	//	}
-	//default:
-	//	// raw_message fallback (string with CQ codes)
-	//	//if raw, ok := payload["raw_message"].(string); ok {
-	//	//	textParts = append(textParts, stripCQCodes(raw))
-	//	//}
-	//}
 
 	return strings.TrimSpace(strings.Join(textParts, "")), images, audio
+}
+
+func extractDuration(path string) (int, error) {
+	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	parts := strings.Split(name, "_")
+
+	if len(parts) == 0 {
+		return 0, fmt.Errorf("文件名格式错误")
+	}
+
+	return strconv.Atoi(parts[len(parts)-1])
 }
 
 func jsonInt64(m map[string]any, key string) int64 {
