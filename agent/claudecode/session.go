@@ -25,6 +25,12 @@ import (
 //
 // In "auto" mode, permission requests are auto-approved internally
 // (avoiding --dangerously-skip-permissions which fails under root).
+
+// claudeSession 负责管理一个长期运行的 Claude Code 进程，
+// 它使用了 --input-format stream-json 和 --permission-prompt-tool stdio 参数。
+//
+// 在“自动”模式下，权限请求会在内部被自动批准，
+// （这样做是为了避免使用 --dangerously-skip-permissions 参数，因为该参数在 root 用户下会失效）。
 type claudeSession struct {
 	cmd             *exec.Cmd
 	stdin           io.WriteCloser

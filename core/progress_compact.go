@@ -203,6 +203,9 @@ func inferLegacyEntryKind(entry string) ProgressCardEntryKind {
 
 // compactProgressWriter coalesces intermediate progress (thinking/tool-use)
 // into one editable message for platforms that support message updates.
+
+// compactProgressWriter 会将中间的进度信息（比如思考过程、工具调用）合并成一条可编辑的消息，
+// 专门用于那些支持“消息更新”功能的平台。
 type compactProgressWriter struct {
 	ctx      context.Context
 	platform Platform
