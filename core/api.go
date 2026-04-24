@@ -63,7 +63,7 @@ func NewAPIServer(dataDir string) (*APIServer, error) {
 	}
 	s.mux.HandleFunc("/send", s.handleSend)
 	s.mux.HandleFunc("/sessions", s.handleSessions)
-	s.mux.HandleFunc("/cron/add", s.handleCronAdd)
+	s.mux.HandleFunc("/cron/add", s.handleCronAdd) // 任务最终都发给服务器处理。
 	s.mux.HandleFunc("/cron/list", s.handleCronList)
 	s.mux.HandleFunc("/cron/info", s.handleCronInfo)
 	s.mux.HandleFunc("/cron/edit", s.handleCronEdit)
@@ -283,7 +283,7 @@ func (s *APIServer) handleCronAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job := &CronJob{
+	job := &CronJob{ // 最终在cc-connect内置服务器上创建定时任务
 		ID:          GenerateCronID(),
 		Project:     project,
 		SessionKey:  sessionKey,

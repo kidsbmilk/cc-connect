@@ -557,7 +557,7 @@ Editable Fields (string):
   project       Target project name
   session_key   Target session key
   cron_expr     Cron expression, e.g. "0 6 * * *"
-  prompt        Task prompt (runs through agent)
+  prompt        Task prompt (runs through agent) // 调用claude code来执行，prompt是给claude code的任务提示
   exec          Shell command (runs directly)
   work_dir      Working directory for exec
   description   Short description

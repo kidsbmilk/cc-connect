@@ -58,6 +58,7 @@ type PlatformPromptInjector interface {
 // AgentSystemPrompt returns the system prompt fragment that informs agents about
 // cc-connect capabilities (cron scheduling, etc.).
 // The prompt is designed to be appended to the agent's existing system prompt.
+// 非常重要，这就是为啥跟claude code对话新建定时任务时能使用cc-connect cron能力的原因！
 func AgentSystemPrompt() string {
 	return `You are running inside cc-connect, a bridge that connects you to messaging platforms.
 Your normal text responses are automatically delivered to the user — just reply normally, do NOT use cc-connect send for ordinary text replies.

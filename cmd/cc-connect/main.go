@@ -629,7 +629,7 @@ func main() {
 	}
 
 	if cronSched != nil {
-		if err := cronSched.Start(); err != nil {
+		if err := cronSched.Start(); err != nil { // 启动后台定时任务服务
 			slog.Error("cron scheduler start failed", "error", err)
 		}
 	}
@@ -804,7 +804,7 @@ func main() {
 	}
 
 	// Start internal API server for CLI send
-	apiSrv, err := core.NewAPIServer(cfg.DataDir)
+	apiSrv, err := core.NewAPIServer(cfg.DataDir) // 启动内置服务器
 	if err != nil {
 		slog.Warn("api server unavailable", "error", err)
 	} else {

@@ -161,6 +161,8 @@ func (p *Platform) handleMessage(payload map[string]any) {
 	conversationId, _ := payload["conversation_id"].(string)
 	messageID := jsonInt64(payload, "message_id")
 	//userID := jsonInt64(payload, "user_id")
+	// TODO: 一个cc-connect是可以连接多个用户的，可以多seesion，后面研究下怎么用，结合我们的业务有没有啥用。
+	// 目前我是一个对话一个容器，容器里启动一个cc-connect+claude，所有，都设置一样的也没问题。
 	userID := int64(123)
 	//
 	//if userID == p.selfID {
@@ -385,4 +387,17 @@ type replyContext struct {
 	groupID        int64
 	messageID      int32
 	conversationId string
+}
+
+func (p *Platform) ReconstructReplyCtx(sessionKey string) (any, error) {
+	// 前面有设置：
+	//sessionKey = fmt.Sprintf("fuku:%d", userID)
+
+	// 下面参考qq里的写
+	parts := strings.SplitN(sessionKey, ":", 2)
+	if len(parts) < 2 || parts[0] != "fuku" {
+		return nil, fmt.Errorf("fuku: invalid session key %q", sessionKey)
+	}
+	uid, _ := strconv.ParseInt(parts[1], 10, 64)
+	return &replyContext{messageType: "private", userID: uid}, nil
 }

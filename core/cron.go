@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"reflect"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,15 +20,16 @@ import (
 
 // CronJob represents a persisted scheduled task.
 type CronJob struct {
-	ID          string    `json:"id"`
-	Project     string    `json:"project"`
-	SessionKey  string    `json:"session_key"`
-	CronExpr    string    `json:"cron_expr"`
-	Prompt      string    `json:"prompt"`
-	Exec        string    `json:"exec,omitempty"`     // shell command; mutually exclusive with Prompt
-	WorkDir     string    `json:"work_dir,omitempty"` // working directory for exec; empty = agent work_dir
-	Description string    `json:"description"`
-	Enabled     bool      `json:"enabled"`
+	ID          string `json:"id"`
+	Project     string `json:"project"`
+	SessionKey  string `json:"session_key"`
+	CronExpr    string `json:"cron_expr"`
+	Prompt      string `json:"prompt"`
+	Exec        string `json:"exec,omitempty"`     // shell command; mutually exclusive with Prompt
+	WorkDir     string `json:"work_dir,omitempty"` // working directory for exec; empty = agent work_dir
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
+	// 应该是这两个参数控制了是否通知用户。
 	Silent      *bool     `json:"silent,omitempty"`       // suppress start notification; nil = use global default
 	Mute        bool      `json:"mute,omitempty"`         // suppress ALL messages (start + result); job runs silently
 	SessionMode string    `json:"session_mode,omitempty"` // "" or "reuse" = share active session; "new_per_run" = fresh session each run
@@ -396,13 +397,13 @@ func toExportedFieldName(s string) string {
 
 // CronScheduler runs cron jobs by injecting synthetic messages into engines.
 type CronScheduler struct {
-	store         *CronStore
-	cron          *cron.Cron
-	engines       map[string]*Engine // project name → engine
-	mu            sync.RWMutex
-	entries       map[string]cron.EntryID // job ID → cron entry
-	defaultSilent      bool   // global default for suppressing cron start notifications
-	defaultSessionMode string // global default session mode; "" = reuse, "new_per_run" = fresh session each run
+	store              *CronStore
+	cron               *cron.Cron
+	engines            map[string]*Engine // project name → engine
+	mu                 sync.RWMutex
+	entries            map[string]cron.EntryID // job ID → cron entry
+	defaultSilent      bool                    // global default for suppressing cron start notifications
+	defaultSessionMode string                  // global default session mode; "" = reuse, "new_per_run" = fresh session each run
 }
 
 func NewCronScheduler(store *CronStore) *CronScheduler {
@@ -475,7 +476,7 @@ func (cs *CronScheduler) AddJob(job *CronJob) error {
 		return err
 	}
 	if job.Enabled {
-		return cs.scheduleJob(job)
+		return cs.scheduleJob(job) // 开始执行
 	}
 	return nil
 }
@@ -616,7 +617,7 @@ func (cs *CronScheduler) scheduleJob(job *CronJob) error {
 
 	jobID := job.ID
 	entryID, err := cs.cron.AddFunc(job.CronExpr, func() {
-		cs.executeJob(jobID)
+		cs.executeJob(jobID) // 执行定时任务
 	})
 	if err != nil {
 		return err
