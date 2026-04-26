@@ -134,7 +134,7 @@ func main() {
 	engines := make([]*core.Engine, 0, len(cfg.Projects))
 	effectiveWorkDirs := make([]string, 0, len(cfg.Projects))
 
-	for _, proj := range cfg.Projects {
+	for _, proj := range cfg.Projects { // 可以配置多项目，每个项目启动一个agent
 		agent, err := core.CreateAgent(proj.Agent.Type, proj.Agent.Options)
 		if err != nil {
 			slog.Error("failed to create agent", "project", proj.Name, "error", err)
@@ -219,7 +219,8 @@ func main() {
 		engine.SetProjectStateStore(projectState)
 
 		// Wire multi-workspace mode
-		if proj.Mode == "multi-workspace" {
+		if proj.Mode == "multi-workspace" { // 一个cc-connect可以开多个project，每个project配置不同的目录，每个project启动一个agent。
+			// 比如：一个cc-connect，启动一个前端核一个后端，外部沟通平台可以指挥前端和后端完成任务。
 			baseDir := proj.BaseDir
 			if strings.HasPrefix(baseDir, "~/") {
 				home, _ := os.UserHomeDir()
@@ -240,6 +241,7 @@ func main() {
 		}
 
 		// Wire command persistence callbacks
+		// 连接（或注册）命令持久化的回调函数，下面应该是实现在对话中动态增删命令。
 		engine.SetCommandSaveAddFunc(func(name, description, prompt, exec, workDir string) error {
 			return config.AddCommand(config.CommandConfig{Name: name, Description: description, Prompt: prompt, Exec: exec, WorkDir: workDir})
 		})
@@ -272,13 +274,15 @@ func main() {
 		engine.SetAdminFrom(proj.AdminFrom)
 
 		// Wire per-user role-based policies
+		//# 配置 [projects.users] 后，每个用户会被分配到一个角色。
+		//# 角色控制该用户可用的命令和速率限制。未配置时行为不变（向后兼容）。
 		if proj.Users != nil {
 			engine.SetUserRoles(buildUserRoleManager(proj.Users))
 		}
 
 		// Wire display truncation settings
 		{
-			dcfg := core.DisplayCfg{
+			dcfg := core.DisplayCfg{ // 显示截断配置，非常重要！
 				ThinkingMaxLen: 300,
 				ToolMaxLen:     500,
 				ToolMessages:   true,
@@ -317,8 +321,9 @@ func main() {
 		}
 
 		// Wire rate limiting
+		// 这个一定长度时间窗口内消息数，需要修改下！
 		{
-			maxMsg := 20
+			maxMsg := 50
 			windowSecs := 60
 			if cfg.RateLimit.MaxMessages != nil {
 				maxMsg = *cfg.RateLimit.MaxMessages
@@ -334,6 +339,7 @@ func main() {
 			}
 		}
 		// Wire outgoing rate limiting
+		//# 限制向平台发送消息的速率，防止因频率过高被封号（如企业微信）。
 		{
 			var maxPS float64
 			if cfg.OutgoingRateLimit.MaxPerSecond != nil {
@@ -366,6 +372,7 @@ func main() {
 		})
 
 		// Wire idle timeout
+		//# Agent 空闲超时：两次 agent 事件之间的最大等待分钟数，超时则认为会话卡住。设为 0 禁用。
 		if cfg.IdleTimeoutMins != nil {
 			mins := *cfg.IdleTimeoutMins
 			if mins <= 0 {
@@ -376,6 +383,10 @@ func main() {
 		}
 
 		// Wire default quiet mode: project-level overrides global
+		// 这个跟配置说明里的不一致，说明里默认静默，而这里的实现里默认不静默。
+		// 实现不显示思考过程和工具执行过程的方式有2种：
+		// 一种是在claude code中关闭显示，但是还是会思考，只是不显示；
+		// 另一种是在这里关闭。
 		if proj.Quiet != nil {
 			engine.SetDefaultQuiet(*proj.Quiet)
 		} else if cfg.Quiet != nil {
@@ -561,6 +572,7 @@ func main() {
 		})
 
 		// Wire /web command callbacks
+		// /web是配置前端页面可访问，跟启动内置api server不一样，无论用户是否输入 /web，内置服务器都会启动。
 		engine.SetWebSetupFunc(func() (int, string, bool, error) {
 			mgmtToken := core.GenerateToken(16)
 			bridgeToken := core.GenerateToken(16)
@@ -637,6 +649,8 @@ func main() {
 	heartbeatSched.Start()
 
 	// Start bridge server if enabled
+	// 一个非常高级且强大的功能，可以把它理解为一个“远程操控通道”。
+	// 简单来说，它的作用不是让你直接跟 AI 聊天，而是让外部的程序（比如网页、App）能够远程控制你电脑上正在运行的 cc-connect 和 AI Agent。
 	var bridgeSrv *core.BridgeServer
 	if cfg.Bridge.Enabled != nil && *cfg.Bridge.Enabled {
 		port := cfg.Bridge.Port
@@ -657,6 +671,8 @@ func main() {
 	}
 
 	// Start webhook server if enabled
+	//# Webhook / 外部 Webhook 端点
+	//# 暴露一个 HTTP 端点，供外部系统（git hook、CI/CD、文件监听）触发 agent 或 shell 命令。
 	var webhookSrv *core.WebhookServer
 	if cfg.Webhook.Enabled != nil && *cfg.Webhook.Enabled {
 		port := cfg.Webhook.Port
@@ -675,6 +691,8 @@ func main() {
 	}
 
 	// Start management API server if enabled
+	//# 管理 API（外部管理工具）
+	//# 为外部应用（Web 管理面板、TUI、GUI、Mac 托盘应用）提供 HTTP REST API。
 	var mgmtSrv *core.ManagementServer
 	if cfg.Management.Enabled != nil && *cfg.Management.Enabled {
 		port := cfg.Management.Port
@@ -1210,7 +1228,7 @@ func reloadConfig(configPath, projName string, engine *core.Engine) (*core.Confi
 	} else if cfg.Quiet != nil {
 		engine.SetDefaultQuiet(*cfg.Quiet)
 	} else {
-		engine.SetDefaultQuiet(false)
+		engine.SetDefaultQuiet(false) // 默认不静默
 	}
 
 	// Reload auto-compress settings

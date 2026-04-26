@@ -13,10 +13,24 @@ var (
 	agentFactories    = make(map[string]AgentFactory)
 )
 
+/*
+每个agent的模块里有如下代码，启动时就会注册自己
+
+	func init() {
+		core.RegisterPlatform("fuku", New)
+	}
+*/
 func RegisterPlatform(name string, factory PlatformFactory) {
 	platformFactories[name] = factory
 }
 
+/*
+每个agent的模块里有如下代码，启动时就会注册自己
+
+	func init() {
+		core.RegisterAgent("claudecode", New)
+	}
+*/
 func RegisterAgent(name string, factory AgentFactory) {
 	agentFactories[name] = factory
 }

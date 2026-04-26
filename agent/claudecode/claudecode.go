@@ -53,7 +53,7 @@ type Agent struct {
 }
 
 func New(opts map[string]any) (core.Agent, error) {
-	workDir, _ := opts["work_dir"].(string)
+	workDir, _ := opts["work_dir"].(string) // 设置claude code的工作目录
 	if workDir == "" {
 		workDir = "."
 	}
@@ -80,6 +80,8 @@ func New(opts map[string]any) (core.Agent, error) {
 	}
 
 	// Claude Code Router support
+	// 已经支持 claude-code-router 了，这么牛逼！
+	// 确实支持 claude-code-router，见：usageProbeEnv。
 	routerURL, _ := opts["router_url"].(string)
 	routerAPIKey, _ := opts["router_api_key"].(string)
 
@@ -570,9 +572,9 @@ func (a *Agent) SkillDirs() []string {
 	if err != nil {
 		absDir = a.workDir
 	}
-	dirs := []string{filepath.Join(absDir, ".claude", "skills")}
+	dirs := []string{filepath.Join(absDir, ".claude", "skills")} // 从工作目录下的.claude/skills里加载技能
 	if home, err := os.UserHomeDir(); err == nil {
-		dirs = append(dirs, filepath.Join(home, ".claude", "skills"))
+		dirs = append(dirs, filepath.Join(home, ".claude", "skills")) // 从用户根目录下的.claude/skills里加载技能
 	}
 	return dirs
 }

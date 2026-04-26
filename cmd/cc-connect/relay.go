@@ -66,7 +66,7 @@ func runRelaySend(args []string) {
 	}
 
 	if from == "" {
-		from = os.Getenv("CC_PROJECT")
+		from = os.Getenv("CC_PROJECT") // 发送工具的from是值某个cc
 	}
 	if sessionKey == "" {
 		sessionKey = os.Getenv("CC_SESSION_KEY")
@@ -90,7 +90,7 @@ func runRelaySend(args []string) {
 		os.Exit(1)
 	}
 
-	sockPath := resolveSocketPath(dataDir)
+	sockPath := resolveSocketPath(dataDir) // 是直接打开底层的socket文件吗？
 	if _, err := os.Stat(sockPath); os.IsNotExist(err) {
 		fmt.Fprintf(os.Stderr, "Error: cc-connect is not running (socket not found: %s)\n", sockPath)
 		os.Exit(1)

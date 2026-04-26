@@ -508,6 +508,9 @@ func apiPost(sockPath, path string, payload []byte) (*http.Response, error) {
 			},
 		},
 	}
+	// 通过本地文件（Socket）直接把数据管道传输给了监听该文件的另一个服务（如 Docker Daemon、Nginx 或微服务组件）。
+	// 是发给cc-connect内部的web服务器，并不是发给cc-connect外部的服务器。
+	// NewAPIServer 启动服务器时会监听 socket 文件。
 	return client.Post("http://unix"+path, "application/json", bytes.NewReader(payload))
 }
 

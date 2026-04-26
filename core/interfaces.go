@@ -269,6 +269,22 @@ type ProviderConfig struct {
 }
 
 // ProviderSwitcher is an optional interface for agents that support multiple API providers.
+/*
+跟claude-code-router的动态使用不同模型啥区别:
+这两者的核心区别在于“切换的粒度”和“自动化的程度”。
+简单来说：
+ProviderSwitcher (cc-connect) 像是手动挡汽车：你需要显式地挂挡（调用接口）来切换引擎，适合在代码逻辑中根据特定条件强制指定模型。
+claude-code-router (CCR) 像是带有智能四驱系统的自动挡：你只管踩油门（发送请求），它会根据路况（提示词内容、任务类型）自动决定是用省油模式（小模型）还是越野模式（大模型）。
+
+核心区别对比表:
+| 维度 | ProviderSwitcher (cc-connect) | claude-code-router (CCR) |
+| :--- | :--- | :--- |
+| 切换方式 | 显式调用 (`agent.SwitchProvider(...)`) | 隐式规则 (配置文件/路由策略) |
+| 控制层级 | 代码级 (由 Go 代码逻辑控制) | 配置级/代理级 (中间件自动拦截) |
+| 动态能力 | 会话级/请求级 (需代码介入) | Token级/步骤级 (全自动) |
+| 典型场景 | "用户输入 `/use deepseek` 命令时切换" | "规划阶段用 Opus，写代码阶段用 Sonnet" |
+| 依赖 | 需要 Agent 实现该接口 | 独立进程，Agent 无感知 |
+*/
 type ProviderSwitcher interface {
 	SetProviders(providers []ProviderConfig)
 	SetActiveProvider(name string) bool

@@ -201,7 +201,7 @@ func (a *Agent) usageProbeEnv() []string {
 	env := append([]string(nil), a.providerEnvLocked()...)
 	env = append(env, a.sessionEnv...)
 	if a.routerURL != "" {
-		env = append(env, "ANTHROPIC_BASE_URL="+a.routerURL)
+		env = append(env, "ANTHROPIC_BASE_URL="+a.routerURL) // 支持 claude-code-router
 		env = append(env, "NO_PROXY=127.0.0.1")
 		if a.routerAPIKey != "" {
 			env = append(env, "ANTHROPIC_API_KEY="+a.routerAPIKey)

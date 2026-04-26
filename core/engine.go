@@ -481,6 +481,16 @@ func (e *Engine) SetWebStatusFunc(fn func() string)                    { e.webSt
 //
 // This allows the agent to identify who sent the message and adjust behavior
 // accordingly (e.g. personal task views, role-based access control).
+
+// SetInjectSender 控制是否在转发给 Agent 之前，将发送者的身份信息
+// （即平台和用户 ID）作为前缀添加到每条消息中。
+//
+// 当启用该功能时，Agent 接收到的消息开头会包含这样一行前缀信息：
+//
+//	[cc-connect sender_id=ou_abc123 platform=feishu]
+//
+// 这使得 Agent 能够识别是谁发送了消息，并据此调整其行为
+// （例如：显示个性化的任务视图、执行基于角色的访问控制等）。
 func (e *Engine) SetInjectSender(v bool) {
 	e.injectSender = v
 }
@@ -1248,6 +1258,7 @@ func (e *Engine) resolveAlias(content string) string {
 	return content
 }
 
+// 真正处理消息的地方。
 func (e *Engine) handleMessage(p Platform, msg *Message) {
 	slog.Info("zztest message received",
 		"platform", msg.Platform, "msg_id", msg.MessageID,
@@ -1319,6 +1330,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 
 	// Multi-workspace resolution
 	// 如果你配置了多个工作区，这里会决定把消息路由到哪个工作区的 AI。
+	// 一个用户有多个会话的情况，就可以使用多工作区的方式实现，容器内一个cc-connect，多工作区对应多个回话目录。非常好，非常重要！
 	var wsAgent Agent
 	var wsSessions *SessionManager
 	var resolvedWorkspace string
