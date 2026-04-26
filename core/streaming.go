@@ -68,6 +68,8 @@ type PreviewCleaner interface {
 
 // PreviewFinishPreference is an optional interface for platforms that want to
 // keep the preview message as the final delivered message on normal completion.
+// PreviewFinishPreference 是一个可选接口，面向那些希望在正常完成时，
+// 将“预览消息”直接作为最终送达消息的平台。
 type PreviewFinishPreference interface {
 	KeepPreviewOnFinish() bool
 }

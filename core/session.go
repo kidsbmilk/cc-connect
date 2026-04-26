@@ -12,6 +12,9 @@ import (
 
 // ContinueSession is a sentinel value for AgentSessionID that tells the agent
 // to use --continue (resume most recent session) instead of a specific session ID.
+// ContinueSession 是一个用于 AgentSessionID 的哨兵值（特殊标记），
+// 它指示 Agent 使用 --continue 参数（即恢复最近的一次会话），
+// 而不是去连接某个指定的会话 ID。
 const ContinueSession = "__continue__"
 
 // Session tracks one conversation between a user and the agent.

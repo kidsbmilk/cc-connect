@@ -65,6 +65,7 @@ func newClaudeSession(ctx context.Context, workDir, model, sessionID, mode strin
 		args = append(args, "--permission-mode", mode)
 	}
 	args = append(args, "--dangerously-skip-permissions")
+	// continue 是继续最近的会话，而resume是继续某个特定的会话。
 	switch sessionID {
 	case "":
 		// Truly fresh session — no resume, no continue.
@@ -76,8 +77,8 @@ func newClaudeSession(ctx context.Context, workDir, model, sessionID, mode strin
 	default:
 		// Resuming a known session ID — this is cc-connect's own session
 		// from a previous connection, safe to resume directly.
-		// 之前docker里一直失败就是应为这个
-		//args = append(args, "--resume", sessionID)
+		// 之前本机docker里一直失败就是应为这个，现在用户会话完全是一个新目录，放开这个就正常了
+		args = append(args, "--resume", sessionID)
 	}
 	if model != "" {
 		args = append(args, "--model", model)
@@ -397,6 +398,10 @@ func (cs *claudeSession) handleControlRequest(raw map[string]any) {
 // Images are sent as base64 in the multimodal content array.
 // Files are saved to local temp files and referenced in the text prompt
 // so Claude Code can read them with its built-in tools.
+// Send 函数将用户消息（可选包含图片和文件）写入 Claude 进程的 stdin（标准输入）。
+// 图片会被转换为 base64 格式，并放入多模态内容数组中发送。
+// 文件则会被保存到本地临时文件中，并在文本提示词中引用它们的路径，
+// 以便 Claude Code 能够使用其内置工具来读取这些文件。
 func (cs *claudeSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
 	if !cs.alive.Load() {
 		return fmt.Errorf("session process is not running")

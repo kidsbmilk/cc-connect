@@ -257,6 +257,13 @@ func progressStyleForPlatform(p Platform) string {
 // lines are still shown, but a separate chat message for EventToolResult is
 // skipped to avoid duplicate noise (e.g. Codex structured tool results on Feishu).
 // Platforms without ProgressStyleProvider keep showing standalone tool results.
+// 当某个平台启用了进度样式支持（ProgressStyleProvider）但同时处于旧版模式时，
+// SuppressStandaloneToolResultEvent 为 true。
+//
+// 在这种情况下，仍然会显示 tool_use（工具使用）的行，但会跳过发送单独的 EventToolResult（工具结果）聊天消息，
+// 以避免产生重复的噪音（例如飞书上 Codex 的结构化工具结果）。
+//
+// 对于那些没有实现 ProgressStyleProvider 的平台，则继续保持显示独立的工具结果消息。
 func SuppressStandaloneToolResultEvent(p Platform) bool {
 	_, ok := p.(ProgressStyleProvider)
 	if !ok {

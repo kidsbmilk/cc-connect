@@ -1882,6 +1882,8 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 
 	// Apply per-message permission mode override (e.g. cron jobs with mode = "bypassPermissions").
 	// Defer restores only when SetLiveMode succeeds for the override.
+	// 应用针对单条消息的权限模式覆盖（例如：设置为 mode = "bypassPermissions" 的定时任务）。
+	// 仅当 SetLiveMode 成功执行了该覆盖操作时，才推迟（ defer ）恢复操作。
 	if msg.ModeOverride != "" {
 		slog.Debug("[MODE] applying mode override", "session_key", interactiveKey, "mode", msg.ModeOverride)
 		if switcher, ok := state.agentSession.(LiveModeSwitcher); ok {
@@ -1906,6 +1908,9 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	// Start typing indicator if platform supports it.
 	// Ownership is transferred to processInteractiveEvents which manages
 	// stopping/restarting it across queued message turns.
+	// 如果当前平台支持，则启动“正在输入...”的状态指示器。
+	// 控制权将移交给 processInteractiveEvents，由它负责在消息轮次队列中
+	// 管理该指示器的停止与重启。
 	var stopTyping func()
 	if ti, ok := p.(TypingIndicator); ok {
 		stopTyping = ti.StartTyping(e.ctx, msg.ReplyCtx)
@@ -1929,6 +1934,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	slog.Debug("[DRAIN] stale events drained", "session_key", interactiveKey)
 
 	// 将用户的消息内容、用户ID、平台信息等组合成一个完整的提示词，准备发送给 AI。
+	// TODO: 在这里注入工具建议。从技能平台拿到工具建议。
 	promptContent := e.buildSenderPrompt(msg.Content, msg.UserID, msg.Platform, msg.SessionKey)
 	slog.Debug("[PROMPT] built sender prompt", "session_key", interactiveKey, "prompt_len", len(promptContent))
 
@@ -1946,7 +1952,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	sendDone := make(chan error, 1)
 	go func() {
 		slog.Debug("[SEND] goroutine started: sending prompt to agent", "session_key", interactiveKey)
-		err := state.agentSession.Send(promptContent, msg.Images, msg.Files)
+		err := state.agentSession.Send(promptContent, msg.Images, msg.Files) // 将 promptContent 发送给ai进程。
 		if err != nil {
 			slog.Error("[SEND] agent session send failed", "session_key", interactiveKey, "error", err)
 		} else {
@@ -1960,15 +1966,27 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	e.processInteractiveEvents(state, session, sessions, interactiveKey, msg.MessageID, turnStart, stopTyping, sendDone, msg.ReplyCtx)
 	slog.Info("[LOOP] exited processInteractiveEvents", "session_key", interactiveKey, "elapsed", time.Since(turnStart))
 
+	// 上面 processInteractiveEvents 正常处理完就会结束：
+	// case EventResult: ... return
 	if elapsed := time.Since(sendStart); elapsed >= slowAgentSend {
+		// 这个看起来并不仅仅是“慢发送”，而是“整个处理（从发送开始到收到agent处理完为止）都慢”
 		slog.Warn("slow agent send", "elapsed", elapsed, "session", msg.SessionKey, "content_len", len(msg.Content))
 	}
-	stopTyping = nil // ownership transferred; prevent defer from double-stopping
+	// processInteractiveEvents里已经用defer处理stopTyping了，所以这里清除stopTyping。
+	stopTyping = nil // ownership transferred; prevent defer from double-stopping // 所有权已转移；防止 defer 语句执行双重停止操作。
 
 	// Guard against a narrow race: a message may have been queued between
 	// processInteractiveEvents observing an empty queue and returning here
 	// (session is still locked, so handleMessage's TryLock fails and routes
 	// the message to queueMessageForBusySession). Drain any such orphans.
+	// 防范一种极端的竞态情况：
+	// 在 processInteractiveEvents 检测到队列为空之后，但在返回此处之前，
+	// 可能刚好有新消息被加入了队列。
+	//
+	// （此时会话锁仍然持有，导致 handleMessage 中的 TryLock 失败，
+	// 从而将该消息路由到了 queueMessageForBusySession）。
+	// 请排空（Drain）任何此类“孤儿”消息。
+	// TODO: 从发送开始到收到agent处理完为止，这直接都是加锁的，所有有些权限申请在回复后会提示：消息正在处理，排队处理之类的。多个消息的发送也需要优化下加锁情况。
 	slog.Debug("[DRAIN] checking for pending messages after loop", "session_key", interactiveKey)
 	if e.drainPendingMessages(state, session, sessions, interactiveKey) {
 		unlocked = true
@@ -2300,6 +2318,9 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 
 	// stopTyping tracks the current turn's typing indicator so it can be
 	// stopped when a queued message starts a new turn.
+	// stopTyping 用于追踪当前轮次的“正在输入”指示器，
+	// 以便在队列中的下一条消息开启新一轮对话时，能够及时将指示器停止。
+	// 这个“正在输入”是cc-connect、claude发给外部平台的，比如飞书、微信等，让用户知道ai正在处理数据。
 	stopTyping := stopTypingFn
 	defer func() {
 		if stopTyping != nil {
@@ -2320,9 +2341,10 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 	if e.eventIdleTimeout > 0 {
 		idleTimer = time.NewTimer(e.eventIdleTimeout)
 		defer idleTimer.Stop()
-		idleCh = idleTimer.C
+		idleCh = idleTimer.C // 定时器到时后，会发消息到idleCh
 	}
 
+	// claudeSession 的 readLoop 方法会往events写数据
 	events := state.agentSession.Events()
 	stopCh := state.stopSignal()
 	// 在一个循环中监听 AI 进程发出来的各种“事件”（比如“我在思考”、“我要运行代码”、“这是结果”），并把这些事件实时地转换成飞书的消息发回去。
@@ -2644,8 +2666,9 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			}
 
 			// Context usage indicator: prefer SDK tokens, fall back to self-reported.
+			// 上下文使用量指示器：优先采用 SDK 计算的 Token 数量，如果不可用，则回退到（模型）自报告的数量。
 			sdkPlausible := event.InputTokens >= 100
-			selfPct := parseSelfReportedCtx(fullResponse)
+			selfPct := parseSelfReportedCtx(fullResponse) // 似乎是claude code会返回这个占用比例，这里只是解析出来？TODO
 			cleanResponse := ctxSelfReportRe.ReplaceAllString(fullResponse, "")
 			cleanResponse = strings.TrimRight(cleanResponse, "\n ")
 
@@ -2705,6 +2728,11 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			// When tool calls happened and prior text was already surfaced in segments,
 			// only send the unsent remainder. In quiet mode, tool events don't surface
 			// side-channel messages and segmentStart stays 0, so keep normal finalize flow.
+			// 当发生了工具调用，且之前的文本内容已经以分段形式展示过时，
+			// 仅发送剩余未发送的那部分内容。
+			//
+			// 在“静默模式”下，工具事件不会触发侧边通道消息（side-channel messages），
+			// 且 segmentStart 保持为 0，因此保持正常的 finalize（结束/结算）流程即可。
 			if toolCount > 0 && segmentStart > 0 {
 				sp.discard()
 				if segmentStart < len(textParts) {
@@ -2736,6 +2764,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			}
 
 			// TTS: async voice reply if enabled
+			// 文本转语音
 			if e.tts != nil && e.tts.Enabled && e.tts.TTS != nil {
 				state.mu.Lock()
 				fromVoice := state.fromVoice
@@ -2751,6 +2780,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			slog.Debug("EventResult: sending final response", "response_len", len(fullResponse), "chunks", len(splitMessage(fullResponse, maxPlatformMessageLen)))
 
 			// Auto-compress after finishing a turn, before sending any queued messages.
+			// 在完成一轮对话后、发送任何队列中的消息之前，自动执行上下文压缩。
 			if triggerAutoCompress {
 				if pendingSend != nil {
 					if err := <-pendingSend; err != nil {
@@ -2769,6 +2799,8 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 
 			// Check for queued messages — if present, continue the event loop
 			// for the next turn instead of returning.
+			// 检查是否有排队的消息 —— 如果存在，则继续运行事件循环以进入下一轮对话，
+			// 而不是直接返回（结束当前流程）。
 			state.mu.Lock()
 			if len(state.pendingMessages) > 0 {
 				slog.Info("[QUEUE] queued messages found, switching to next turn", "session_key", sessionKey, "queue_size", len(state.pendingMessages))
@@ -2794,6 +2826,12 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				// Drain stale events before starting the next turn. Between
 				// EventResult and Send(), the only buffered events would be
 				// stale leftovers (e.g. a deferred EventError from cmd.Wait()).
+
+				// 在开始下一轮之前，排空（Drain）那些过期的事件。
+				//
+				// 在 EventResult（事件结果处理）和 Send()（发送消息）之间，
+				// 缓冲区里可能残留的唯一事件就是过期的遗留物
+				// （例如：由 cmd.Wait() 产生的被延迟的 EventError）。
 				drainEvents(state.agentSession.Events())
 				slog.Debug("[DRAIN] drained stale events before next turn", "session_key", sessionKey)
 				if pendingSend != nil {
@@ -2805,7 +2843,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				queuedPrompt := e.buildSenderPrompt(queued.content, queued.userID, queued.msgPlatform, queued.msgSessionKey)
 
 				nextSend := make(chan error, 1)
-				go func() {
+				go func() { // 异步发送，防止阻塞
 					nextSend <- state.agentSession.Send(queuedPrompt, queued.images, queued.files)
 				}()
 				pendingSend = nextSend
@@ -2853,6 +2891,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 
 		case EventError:
 			// 如果 AI 进程内部报错（比如 Python 代码语法错误），AI 会发一个 EventError，这里负责把这个错误展示给用户。
+			// TODO: 做有一些监控，其他的地方也做些监控
 			slog.Error("[ERROR] agent error event received", "session_key", sessionKey, "error", event.Error, "agent_alive", state.agentSession.Alive())
 			cp.Finalize(ProgressCardStateFailed)
 			sp.discard()
@@ -2863,6 +2902,11 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			// Only drop queued messages if the agent session is dead.
 			// Some agents (e.g. Codex) emit EventError for per-turn failures
 			// while keeping the session alive for subsequent turns.
+
+			// 仅当 Agent 会话彻底死亡时，才丢弃排队的消息。
+			//
+			// 有些 Agent（例如 Codex）在发生单轮失败时会发出 EventError，
+			// 但会话本身仍然存活，可以继续处理后续的轮次。
 			if state.agentSession == nil || !state.agentSession.Alive() {
 				e.notifyDroppedQueuedMessages(state, event.Error)
 			}
@@ -2927,6 +2971,13 @@ func (e *Engine) notifyDroppedQueuedMessages(state *interactiveState, reason err
 // queue. It atomically unlocks the session when the queue is empty (while holding
 // state.mu) to close the race window between "queue empty" and "session unlocked".
 // Returns true if the session was unlocked by this call.
+
+// drainPendingMessages 函数负责处理状态中 pendingMessages 队列里的所有排队消息。
+//
+// 当队列为空时，它会在持有 state.mu（状态互斥锁）的情况下，原子性地解锁会话，
+// 以此来消除“队列为空”和“会话解锁”这两个动作之间的竞态窗口。
+//
+// 如果会话是由本次调用解锁的，则返回 true。
 func (e *Engine) drainPendingMessages(state *interactiveState, session *Session, sessions *SessionManager, sessionKey string) bool {
 	for {
 		state.mu.Lock()
@@ -5519,6 +5570,8 @@ func (e *Engine) cmdCompress(p Platform, msg *Message) {
 
 // runCompress sends the agent's compress command and handles results.
 // If autoTriggered is true, suppress user-visible "compressing" and completion messages.
+// runCompress 函数负责发送 Agent 的压缩指令并处理返回结果。
+// 如果 autoTriggered 为 true，则 suppress（抑制/不显示）用户可见的“正在压缩”提示和完成消息。
 func (e *Engine) runCompress(state *interactiveState, session *Session, sessions *SessionManager, iKey string, p Platform, replyCtx any, auto bool) {
 	// session.Unlock() is called inside drainQueuedMessagesAfterCompress
 	// while holding state.mu to close the race window. Deferred fallback
